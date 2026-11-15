@@ -1,0 +1,516 @@
+{
+  "name": "vjudge",
+  "displayName": "VJudge",
+  "description": "在 VS Code 中浏览 VJudge 题目、阅读题面、提交代码并查看评测结果。",
+  "version": "0.1.0",
+  "publisher": "niobium-41-nb",
+  "license": "MIT",
+  "icon": "resources/icon.png",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Education",
+    "Other"
+  ],
+  "keywords": [
+    "vjudge",
+    "online judge",
+    "competitive programming",
+    "oi",
+    "acm"
+  ],
+  "main": "./out/extension.js",
+  "activationEvents": [
+    "onView:vjudge.problems",
+    "onView:vjudge.contests",
+    "onView:vjudge.submissions",
+    "onView:vjudge.workbooks",
+    "onCommand:vjudge.login",
+    "onCommand:vjudge.submit"
+  ],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": false,
+      "description": "本地样例测试会运行工作区中的代码，因此不在受限模式下启用。"
+    }
+  },
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "vjudge",
+          "title": "VJudge",
+          "icon": "resources/vjudge.svg"
+        }
+      ]
+    },
+    "views": {
+      "vjudge": [
+        {
+          "id": "vjudge.problems",
+          "name": "题目",
+          "contextualTitle": "VJudge 题目"
+        },
+        {
+          "id": "vjudge.contests",
+          "name": "比赛",
+          "contextualTitle": "VJudge 比赛"
+        },
+        {
+          "id": "vjudge.workbooks",
+          "name": "题单",
+          "contextualTitle": "VJudge 题单"
+        },
+        {
+          "id": "vjudge.submissions",
+          "name": "提交记录",
+          "contextualTitle": "VJudge 提交记录"
+        }
+      ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "vjudge.problems",
+        "contents": "登录 VJudge 后可以搜索题目并查看题面。\n[登录](command:vjudge.login)\n[使用 Cookie 登录](command:vjudge.loginWithCookie)\n[搜索题目](command:vjudge.searchProblem)",
+        "when": "!vjudge.loggedIn"
+      },
+      {
+        "view": "vjudge.problems",
+        "contents": "使用右上角的搜索按钮查找题目。\n[搜索题目](command:vjudge.searchProblem)",
+        "when": "vjudge.loggedIn"
+      },
+      {
+        "view": "vjudge.contests",
+        "contents": "登录后可查看自己参加的比赛。\n[登录](command:vjudge.login)",
+        "when": "!vjudge.loggedIn"
+      },
+      {
+        "view": "vjudge.workbooks",
+        "contents": "登录后可查看自己加入、创建和关注的题单。\n[登录](command:vjudge.login)",
+        "when": "!vjudge.loggedIn"
+      },
+      {
+        "view": "vjudge.workbooks",
+        "contents": "可以创建题单，或在题目右键菜单中把题目加入题单。\n[创建题单](command:vjudge.createWorkbook)\n[搜索题单](command:vjudge.searchWorkbooks)",
+        "when": "vjudge.loggedIn"
+      },
+      {
+        "view": "vjudge.submissions",
+        "contents": "登录后可查看自己的提交记录。\n[登录](command:vjudge.login)",
+        "when": "!vjudge.loggedIn"
+      }
+    ],
+    "commands": [
+      {
+        "command": "vjudge.login",
+        "title": "VJudge: 登录",
+        "icon": "$(account)"
+      },
+      {
+        "command": "vjudge.loginWithCookie",
+        "title": "VJudge: 使用 Cookie 登录",
+        "icon": "$(key)"
+      },
+      {
+        "command": "vjudge.logout",
+        "title": "VJudge: 注销",
+        "icon": "$(sign-out)"
+      },
+      {
+        "command": "vjudge.searchProblem",
+        "title": "VJudge: 搜索题目",
+        "icon": "$(search)"
+      },
+      {
+        "command": "vjudge.refreshProblems",
+        "title": "VJudge: 刷新题目",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "vjudge.refreshContests",
+        "title": "VJudge: 刷新比赛",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "vjudge.searchWorkbooks",
+        "title": "VJudge: 搜索题单",
+        "icon": "$(search)"
+      },
+      {
+        "command": "vjudge.refreshWorkbooks",
+        "title": "VJudge: 刷新题单",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "vjudge.toggleWorkbookMembership",
+        "title": "VJudge: 加入 / 退出题单",
+        "icon": "$(sign-in)"
+      },
+      {
+        "command": "vjudge.copyWorkbookLink",
+        "title": "VJudge: 复制题单链接",
+        "icon": "$(copy)"
+      },
+      {
+        "command": "vjudge.createWorkbook",
+        "title": "VJudge: 创建题单",
+        "icon": "$(add)"
+      },
+      {
+        "command": "vjudge.addToWorkbook",
+        "title": "VJudge: 添加题目到题单",
+        "icon": "$(add)"
+      },
+      {
+        "command": "vjudge.refreshSubmissions",
+        "title": "VJudge: 刷新提交记录",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "vjudge.openProblem",
+        "title": "VJudge: 打开题面",
+        "icon": "$(book)"
+      },
+      {
+        "command": "vjudge.submit",
+        "title": "VJudge: 提交代码",
+        "icon": "$(cloud-upload)"
+      },
+      {
+        "command": "vjudge.newFile",
+        "title": "VJudge: 新建代码文件",
+        "icon": "$(new-file)"
+      },
+      {
+        "command": "vjudge.testSamples",
+        "title": "VJudge: 本地测试样例",
+        "icon": "$(play)"
+      },
+      {
+        "command": "vjudge.importCph",
+        "title": "VJudge: 导入 CPH 测试数据",
+        "icon": "$(cloud-download)"
+      },
+      {
+        "command": "vjudge.openInBrowser",
+        "title": "VJudge: 在浏览器中打开",
+        "icon": "$(link-external)"
+      },
+      {
+        "command": "vjudge.showSubmission",
+        "title": "VJudge: 查看提交详情",
+        "icon": "$(list-unordered)"
+      },
+      {
+        "command": "vjudge.copyProblemLink",
+        "title": "VJudge: 复制题目链接",
+        "icon": "$(copy)"
+      },
+      {
+        "command": "vjudge.showOutput",
+        "title": "VJudge: 显示输出日志"
+      },
+      {
+        "command": "vjudge.editTemplate",
+        "title": "VJudge: 编辑语言模板",
+        "icon": "$(edit)"
+      }
+    ],
+    "menus": {
+      "commandPalette": [
+        {
+          "command": "vjudge.refreshProblems",
+          "when": "false"
+        },
+        {
+          "command": "vjudge.refreshContests",
+          "when": "false"
+        },
+        {
+          "command": "vjudge.refreshWorkbooks",
+          "when": "false"
+        },
+        {
+          "command": "vjudge.toggleWorkbookMembership",
+          "when": "false"
+        },
+        {
+          "command": "vjudge.copyWorkbookLink",
+          "when": "false"
+        },
+        {
+          "command": "vjudge.addToWorkbook",
+          "when": "false"
+        },
+        {
+          "command": "vjudge.refreshSubmissions",
+          "when": "false"
+        },
+        {
+          "command": "vjudge.showSubmission",
+          "when": "false"
+        },
+        {
+          "command": "vjudge.copyProblemLink",
+          "when": "false"
+        }
+      ],
+      "view/title": [
+        {
+          "command": "vjudge.searchProblem",
+          "when": "view == vjudge.problems",
+          "group": "navigation@1"
+        },
+        {
+          "command": "vjudge.refreshProblems",
+          "when": "view == vjudge.problems",
+          "group": "navigation@2"
+        },
+        {
+          "command": "vjudge.refreshContests",
+          "when": "view == vjudge.contests",
+          "group": "navigation@1"
+        },
+        {
+          "command": "vjudge.createWorkbook",
+          "when": "view == vjudge.workbooks && vjudge.loggedIn",
+          "group": "navigation@1"
+        },
+        {
+          "command": "vjudge.searchWorkbooks",
+          "when": "view == vjudge.workbooks",
+          "group": "navigation@2"
+        },
+        {
+          "command": "vjudge.refreshWorkbooks",
+          "when": "view == vjudge.workbooks",
+          "group": "navigation@3"
+        },
+        {
+          "command": "vjudge.refreshSubmissions",
+          "when": "view == vjudge.submissions",
+          "group": "navigation@1"
+        },
+        {
+          "command": "vjudge.login",
+          "when": "view == vjudge.contests && !vjudge.loggedIn",
+          "group": "navigation@3"
+        },
+        {
+          "command": "vjudge.login",
+          "when": "view == vjudge.submissions && !vjudge.loggedIn",
+          "group": "navigation@2"
+        },
+        {
+          "command": "vjudge.logout",
+          "when": "view == vjudge.submissions && vjudge.loggedIn",
+          "group": "navigation@2"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "vjudge.openProblem",
+          "when": "viewItem == vjudge.problem",
+          "group": "inline@1"
+        },
+        {
+          "command": "vjudge.submit",
+          "when": "viewItem == vjudge.problem",
+          "group": "inline@2"
+        },
+        {
+          "command": "vjudge.addToWorkbook",
+          "when": "viewItem == vjudge.problem && vjudge.loggedIn",
+          "group": "inline@3"
+        },
+        {
+          "command": "vjudge.openProblem",
+          "when": "viewItem == vjudge.problem",
+          "group": "1_open@1"
+        },
+        {
+          "command": "vjudge.submit",
+          "when": "viewItem == vjudge.problem",
+          "group": "1_open@2"
+        },
+        {
+          "command": "vjudge.newFile",
+          "when": "viewItem == vjudge.problem",
+          "group": "1_open@3"
+        },
+        {
+          "command": "vjudge.openInBrowser",
+          "when": "viewItem == vjudge.problem",
+          "group": "2_open@1"
+        },
+        {
+          "command": "vjudge.copyProblemLink",
+          "when": "viewItem == vjudge.problem",
+          "group": "2_open@2"
+        },
+        {
+          "command": "vjudge.addToWorkbook",
+          "when": "viewItem == vjudge.problem && vjudge.loggedIn",
+          "group": "3_workbook@1"
+        },
+        {
+          "command": "vjudge.openInBrowser",
+          "when": "viewItem == vjudge.contest",
+          "group": "inline@1"
+        },
+        {
+          "command": "vjudge.openInBrowser",
+          "when": "viewItem == vjudge.workbook",
+          "group": "inline@1"
+        },
+        {
+          "command": "vjudge.addToWorkbook",
+          "when": "viewItem == vjudge.workbook && vjudge.loggedIn",
+          "group": "inline@2"
+        },
+        {
+          "command": "vjudge.toggleWorkbookMembership",
+          "when": "viewItem == vjudge.workbook",
+          "group": "1_workbook@1"
+        },
+        {
+          "command": "vjudge.addToWorkbook",
+          "when": "viewItem == vjudge.workbook && vjudge.loggedIn",
+          "group": "1_workbook@2"
+        },
+        {
+          "command": "vjudge.copyWorkbookLink",
+          "when": "viewItem == vjudge.workbook",
+          "group": "1_workbook@3"
+        },
+        {
+          "command": "vjudge.showSubmission",
+          "when": "viewItem == vjudge.submission",
+          "group": "inline@1"
+        },
+        {
+          "command": "vjudge.openInBrowser",
+          "when": "viewItem == vjudge.submission",
+          "group": "1_open@1"
+        }
+      ],
+      "editor/title": [
+        {
+          "command": "vjudge.submit",
+          "when": "editorTextFocus",
+          "group": "navigation@10"
+        },
+        {
+          "command": "vjudge.testSamples",
+          "when": "editorTextFocus",
+          "group": "navigation@11"
+        }
+      ],
+      "editor/context": [
+        {
+          "command": "vjudge.submit",
+          "when": "editorTextFocus",
+          "group": "vjudge@1"
+        },
+        {
+          "command": "vjudge.testSamples",
+          "when": "editorTextFocus",
+          "group": "vjudge@2"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "VJudge",
+      "properties": {
+        "vjudge.username": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "VJudge 用户名。登录成功后会自动保存。"
+        },
+        "vjudge.defaultLanguage": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "默认提交语言。可填写语言名称（如 `C++17`）或 VJudge 的语言代码（如 `cpp17`）。"
+        },
+        "vjudge.solutionsDirectory": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "新建代码文件的目录。留空表示工作区根目录；相对路径相对于工作区根目录。"
+        },
+        "vjudge.problemPageSize": {
+          "type": "number",
+          "default": 50,
+          "minimum": 5,
+          "maximum": 200,
+          "description": "搜索结果数量上限。"
+        },
+        "vjudge.submissionPageSize": {
+          "type": "number",
+          "default": 30,
+          "minimum": 5,
+          "maximum": 100,
+          "description": "提交记录显示条数。"
+        },
+        "vjudge.statusRefreshInterval": {
+          "type": "number",
+          "default": 30,
+          "minimum": 0,
+          "description": "提交记录自动刷新间隔（秒），0 表示关闭自动刷新。"
+        },
+        "vjudge.requestTimeout": {
+          "type": "number",
+          "default": 20,
+          "minimum": 5,
+          "description": "网络请求超时时间（秒）。"
+        },
+        "vjudge.openCodePublicly": {
+          "type": "boolean",
+          "default": false,
+          "description": "提交时是否公开代码。"
+        },
+        "vjudge.testTimeout": {
+          "type": "number",
+          "default": 10,
+          "minimum": 1,
+          "description": "本地样例测试的单组超时时间（秒）。"
+        },
+        "vjudge.testCommands": {
+          "type": "object",
+          "default": {
+            "cpp": "g++ -std=c++17 -O2 -Wall -o {exe} {file} && {exe}",
+            "c": "gcc -std=c11 -O2 -Wall -o {exe} {file} && {exe}",
+            "py": "python {file}",
+            "java": "cd {dir} && javac -encoding UTF-8 {file} && java Main",
+            "js": "node {file}",
+            "go": "go run {file}",
+            "rs": "rustc -O -o {exe} {file} && {exe}"
+          },
+          "markdownDescription": "按文件扩展名配置本地测试命令（不带点）。支持 `{file}`、`{dir}`、`{exe}`、`{in}`、`{out}` 占位符，占位符会自动加上路径引号。"
+        },
+        "vjudge.languageTemplates": {
+          "type": "object",
+          "default": {},
+          "additionalProperties": {
+            "type": "string"
+          },
+          "markdownDescription": "为每种语言指定默认代码模板文件。键可以是文件扩展名（如 `cpp`、`.py`）或提交语言名称（如 `GNU G++17`）；值为模板文件路径，支持绝对路径或相对首个工作区根目录的路径。未配置时自动使用全局模板目录中对应的文件（执行“VJudge: 编辑语言模板”可打开），再回退到内置模板。模板内容会原样写入新文件，可使用 `${title}`、`${oj}`、`${probNum}` 占位符。"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "check:parsers": "node scripts/check-parsers.js",
+    "check:cph": "node scripts/check-cph.js",
+    "check:templates": "node scripts/check-templates.js",
+    "package": "npx --yes @vscode/vsce package --no-dependencies"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "@types/vscode": "^1.85.0",
+    "typescript": "^5.4.0"
+  }
+}

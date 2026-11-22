@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { registerCommands } from './commands';
+import { ensureGlobalHeaders } from './globalHeaders';
 import { ensureGlobalTemplates } from './globalTemplates';
 import { describeError, Session } from './session';
 import { clearStatementCache } from './statementCache';
@@ -44,6 +45,9 @@ class ExtensionController implements vscode.Disposable {
   async activate(): Promise<void> {
     void ensureGlobalTemplates(this.context).catch((error) => {
       this.output.appendLine(`[VJudge] 创建全局语言模板失败：${describeError(error)}`);
+    });
+    void ensureGlobalHeaders(this.context).catch((error) => {
+      this.output.appendLine(`[VJudge] 创建全局语言头文件失败：${describeError(error)}`);
     });
     this.disposables.push(
       this.output,

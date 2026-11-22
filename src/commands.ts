@@ -6,6 +6,7 @@ import { sanitizeStatementHtml } from './api/parser';
 import { ProblemRef, RemoteAccountBinding, SearchProblemOptions, Solution, SubmissionSummary, WorkbookCategory, WorkbookSummary } from './api/types';
 import { CphFileProblem, CphStore } from './cph';
 import { cphProblemRef } from './cphFormat';
+import { ensureGlobalHeaders, globalHeaderFile, globalHeadersDirectory } from './globalHeaders';
 import { ensureGlobalTemplates, globalTemplateFile, globalTemplatesDirectory } from './globalTemplates';
 import { problemFile, problemForFile, rememberProblemFile } from './problemFiles';
 import { runImportedSamples, runSamples } from './sampleRunner';
@@ -17,8 +18,10 @@ import {
   statementKey,
 } from './statementCache';
 import {
+  applyLanguageHeader,
   applyTemplateVariables,
   buildCodeTemplate,
+  builtinHeaderFiles,
   builtinTemplateFiles,
   safeFileBase,
   templateForLanguage,
@@ -902,6 +905,118 @@ export function registerCommands(deps: CommandDeps): vscode.Disposable[] {
     }
   };
 
+  const resolveHeaderFilePath = (value: string): string => {
+    if (path.isAbsolute(value)) {
+      return value;
+    }
+    const folder = vscode.workspace.workspaceFolders?.[0];
+    return folder ? path.join(folder.uri.fsPath, value) : '';
+  };
+
+  const readHeaderText = async (
+    ref: ProblemRef,
+    uri: vscode.Uri,
+    title: string,
+  ): Promise<string> => {
+    const data = await vscode.workspace.fs.readFile(uri);
+    const content = Buffer.from(data).toString('utf8').replace(/^\uFEFF/, '');
+    return applyTemplateVariables(content.replace(/\r\n?/g, '\n'), {
+      title,
+      oj: ref.oj,
+      probNum: ref.probNum,
+    });
+  };
+
+  const loadLanguageHeader = async (
+    ref: ProblemRef,
+    language: string,
+    extension: string,
+    title: string,
+  ): Promise<string | undefined> => {
+    const candidates = [language, extension, `.${extension}`];
+    const settings = getConfiguration<Record<string, string>>('languageHeaders', {});
+    if (settings && typeof settings === 'object') {
+      const value = templateSettingValue(settings, candidates);
+      if (value) {
+        return applyTemplateVariables(value.replace(/\r\n?/g, '\n'), {
+          title,
+          oj: ref.oj,
+          probNum: ref.probNum,
+        });
+      }
+    }
+    const fileSettings = getConfiguration<Record<string, string>>('languageHeaderFiles', {});
+    if (fileSettings && typeof fileSettings === 'object') {
+      const value = templateSettingValue(fileSettings, candidates);
+      if (value) {
+        const filePath = resolveHeaderFilePath(value);
+        if (!filePath) {
+          void vscode.window.showWarningMessage(
+            `头文件“${value}”是相对路径，请先打开工作区或改用绝对路径。`,
+          );
+        } else {
+          try {
+            return await readHeaderText(ref, vscode.Uri.file(filePath), title);
+          } catch (error) {
+            void vscode.window.showWarningMessage(
+              `读取头文件失败：${describeError(error)}（${filePath}），将使用全局头文件。`,
+            );
+          }
+        }
+      }
+    }
+    const globalFile = globalHeaderFile(context, extension);
+    if (!globalFile) {
+      return undefined;
+    }
+    try {
+      await ensureGlobalHeaders(context);
+      return await readHeaderText(ref, globalFile.uri, title);
+    } catch {
+      return undefined;
+    }
+  };
+
+  const editLanguageHeader = async (): Promise<void> => {
+    try {
+      await ensureGlobalHeaders(context, true);
+    } catch (error) {
+      void vscode.window.showErrorMessage(`创建全局头文件失败：${describeError(error)}`);
+      return;
+    }
+    const directory = globalHeadersDirectory(context);
+    const items: (vscode.QuickPickItem & { header?: string })[] = [
+      {
+        label: '$(folder-opened) 打开头文件目录',
+        description: directory.fsPath,
+      },
+      ...builtinHeaderFiles().map((file) => ({
+        label: file.fileName,
+        description: `.${file.extension}`,
+        header: file.fileName,
+      })),
+    ];
+    const picked = await vscode.window.showQuickPick(items, {
+      title: '编辑语言头文件',
+      placeHolder: '选择要编辑的头文件，或打开头文件目录',
+      matchOnDescription: true,
+    });
+    if (!picked) {
+      return;
+    }
+    if (!picked.header) {
+      await vscode.env.openExternal(directory);
+      return;
+    }
+    const target = vscode.Uri.joinPath(directory, picked.header);
+    try {
+      const document = await vscode.workspace.openTextDocument(target);
+      await vscode.window.showTextDocument(document, { preview: false });
+    } catch (error) {
+      void vscode.window.showErrorMessage(`打开头文件失败：${describeError(error)}`);
+    }
+  };
+
   const newFile = async (arg: unknown): Promise<void> => {
     const ref = await resolveProblem(arg);
     if (!ref) {
@@ -946,6 +1061,16 @@ export function registerCommands(deps: CommandDeps): vscode.Disposable[] {
       if (fallback !== undefined) {
         template.content = fallback;
       }
+    }
+
+    const headerContent = await loadLanguageHeader(
+      ref,
+      displayName,
+      template.extension,
+      title,
+    );
+    if (headerContent?.trim()) {
+      template = applyLanguageHeader(template, headerContent);
     }
 
     const folder = vscode.workspace.workspaceFolders?.[0];
@@ -1644,5 +1769,6 @@ a { color: var(--vscode-textLink-foreground); }
     }),
     vscode.commands.registerCommand('vjudge.showOutput', () => output.show()),
     vscode.commands.registerCommand('vjudge.editTemplate', editLanguageTemplate),
+    vscode.commands.registerCommand('vjudge.editHeader', editLanguageHeader),
   ];
 }

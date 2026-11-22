@@ -223,6 +223,11 @@
         "command": "vjudge.editTemplate",
         "title": "VJudge: 编辑语言模板",
         "icon": "$(edit)"
+      },
+      {
+        "command": "vjudge.editHeader",
+        "title": "VJudge: 编辑语言头文件",
+        "icon": "$(edit)"
       }
     ],
     "menus": {
@@ -503,6 +508,22 @@
             "type": "string"
           },
           "markdownDescription": "为每种语言指定默认代码模板文件。键可以是文件扩展名（如 `cpp`、`.py`）或提交语言名称（如 `GNU G++17`）；值为模板文件路径，支持绝对路径或相对首个工作区根目录的路径。未配置时自动使用全局模板目录中对应的文件（执行“VJudge: 编辑语言模板”可打开），再回退到内置模板。模板内容会原样写入新文件，可使用 `${title}`、`${oj}`、`${probNum}` 占位符。"
+        },
+        "vjudge.languageHeaders": {
+          "type": "object",
+          "default": {},
+          "additionalProperties": {
+            "type": "string"
+          },
+          "markdownDescription": "直接为每种语言指定头文件文本（如 C++ 的 `#include`、Python 的 `import`）。键可以是文件扩展名（如 `cpp`、`.py`）或提交语言名称（如 `GNU G++17`）。优先级高于头文件文件和全局头文件；更推荐用“VJudge: 编辑语言头文件”命令可视化编辑，或配置 `vjudge.languageHeaderFiles` 使用独立文件。"
+        },
+        "vjudge.languageHeaderFiles": {
+          "type": "object",
+          "default": {},
+          "additionalProperties": {
+            "type": "string"
+          },
+          "markdownDescription": "为每种语言指定头文件文件路径，键同 `vjudge.languageHeaders`。值为绝对路径或相对首个工作区根目录的路径，可把头文件纳入版本控制。优先级低于 `vjudge.languageHeaders`，高于全局头文件。"
         }
       }
     }

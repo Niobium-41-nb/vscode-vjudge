@@ -210,6 +210,61 @@ export function applyTemplateVariables(
     .replace(/\$\{probNum\}/g, variables.probNum);
 }
 
+const DEFAULT_HEADERS: Record<string, string> = {
+  cpp: '#include <bits/stdc++.h>\nusing namespace std;\n\n',
+  c: '#include <stdio.h>\n\n',
+  py: 'import sys\n\n\n',
+  java: 'import java.io.*;\nimport java.util.*;\n\n',
+  go: 'import (\n    "bufio"\n    "fmt"\n    "os"\n)\n\n',
+  rs: 'use std::io::{self, Read};\n\n',
+  js: "const fs = require('fs');\n\n",
+  ts: "import { readFileSync } from 'fs';\n\n",
+  kt: 'import java.util.*\n\n',
+  cs: 'using System;\nusing System.Linq;\n\n',
+  swift: 'import Foundation\n\n',
+};
+
+export function applyLanguageHeader(
+  template: LanguageTemplate & { recognized: boolean },
+  headers: string,
+): LanguageTemplate & { recognized: boolean } {
+  const value = headers.replace(/\r\n?/g, '\n').trimEnd();
+  if (!value) {
+    return template;
+  }
+  const defaultHeader = DEFAULT_HEADERS[template.extension.toLowerCase()];
+  if (defaultHeader && template.content.includes(defaultHeader)) {
+    return {
+      ...template,
+      content: template.content.replace(defaultHeader, `${value}\n\n`),
+    };
+  }
+  const lines = template.content.split('\n');
+  if (lines.length > 0 && /^(?:\/\/|#|--)\s/.test(lines[0])) {
+    return {
+      ...template,
+      content: `${lines[0]}\n${value}\n\n${lines.slice(1).join('\n')}`,
+    };
+  }
+  return { ...template, content: `${value}\n\n${template.content}` };
+}
+
+export interface BuiltinHeaderFile {
+  extension: string;
+  fileName: string;
+  content: string;
+}
+
+export function builtinHeaderFiles(): BuiltinHeaderFile[] {
+  const files = Object.entries(DEFAULT_HEADERS).map(([extension, header]) => ({
+    extension,
+    fileName: `${extension}.txt`,
+    content: header.trimEnd(),
+  }));
+  files.sort((a, b) => a.extension.localeCompare(b.extension));
+  return files;
+}
+
 function withTitleComment(extension: string, content: string, title: string): string {
   if (!content) {
     return `// ${title}\n`;

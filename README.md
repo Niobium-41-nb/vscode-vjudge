@@ -45,8 +45,34 @@ code --install-extension niobium-41-nb.vjudge
 | `vjudge.testTimeout` | 10 | 单个样例的本地运行超时（秒） |
 | `vjudge.testCommands` | 内置 cpp/c/py/java/js/go/rs | 文件扩展名到编译运行命令的映射，支持 `{file}`、`{dir}`、`{exe}`、`{in}`、`{out}` |
 | `vjudge.languageTemplates` | 空 | 语言到模板文件路径的映射，优先级高于全局模板文件 |
+| `vjudge.languageHeaders` | 空 | 直接配置各语言头文件文本，优先级最高 |
+| `vjudge.languageHeaderFiles` | 空 | 语言到头文件路径的映射，可纳入版本控制，优先级低于 `vjudge.languageHeaders` |
 
-语言模板还可以通过 `VJudge: 编辑语言模板` 命令直接编辑全局模板目录中的文件，保存即生效。
+语言模板和头文件都可以通过命令可视化编辑，保存即生效：
+
+- `VJudge: 编辑语言模板`：编辑全局模板目录中的文件。
+- `VJudge: 编辑语言头文件`：编辑全局头文件目录中的文件（如 `cpp.txt`、`py.txt`），也可用命令中的“打开头文件目录”批量管理。
+
+头文件配置有三种方式，按优先级从高到低：
+
+1. 在 `vjudge.languageHeaders` 中直接写文本（适合简单修改，多行需用 `\n` 转义）。
+2. 在 `vjudge.languageHeaderFiles` 中指定头文件路径（推荐团队共享，可纳入版本控制）。
+3. 用 `VJudge: 编辑语言头文件` 命令编辑全局文件（最方便，无需处理 JSON 转义）。
+
+配置示例：
+
+```json
+"vjudge.languageHeaders": {
+  "cpp": "#include <bits/stdc++.h>\nusing namespace std;\nusing ll = long long;",
+  "py": "import sys\nfrom collections import deque"
+},
+"vjudge.languageHeaderFiles": {
+  "cpp": ".vscode/cpp.header",
+  "java": "D:/templates/java.header"
+}
+```
+
+头文件内容支持 `${title}`、`${oj}`、`${probNum}` 占位符。
 
 ## 隐私与安全
 

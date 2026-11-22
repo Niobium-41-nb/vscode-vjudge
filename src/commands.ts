@@ -3,7 +3,7 @@ import * as path from 'path';
 import * as vscode from 'vscode';
 import { CaptchaRequiredError, VJudgeError } from './api/errors';
 import { sanitizeStatementHtml } from './api/parser';
-import { ProblemRef, SearchProblemOptions, Solution, SubmissionSummary, WorkbookCategory, WorkbookSummary } from './api/types';
+import { ProblemRef, RemoteAccountBinding, SearchProblemOptions, Solution, SubmissionSummary, WorkbookCategory, WorkbookSummary } from './api/types';
 import { CphFileProblem, CphStore } from './cph';
 import { cphProblemRef } from './cphFormat';
 import { ensureGlobalTemplates, globalTemplateFile, globalTemplatesDirectory } from './globalTemplates';
@@ -313,6 +313,57 @@ export function registerCommands(deps: CommandDeps): vscode.Disposable[] {
       await context.globalState.update('vjudge.lastLanguage', trimmed);
     }
     return trimmed || undefined;
+  };
+
+  const isMethodNotAllowed = (error: unknown): boolean => {
+    const key = error instanceof VJudgeError ? (error.i18nKey ?? '') : '';
+    return /submit_method_not_allowed$/i.test(key);
+  };
+
+  const chooseRemoteAccount = async (oj: string): Promise<number | undefined> => {
+    let bindings: RemoteAccountBinding[];
+    try {
+      bindings = await session.client.listRemoteAccounts(oj);
+    } catch (error) {
+      await reportError('获取远程 OJ 账号失败：', error);
+      return undefined;
+    }
+    const ready = bindings.filter(
+      (item) => !item.runtimeStatus || item.runtimeStatus.toUpperCase() === 'READY',
+    );
+    const manageUrl = `https://vjudge.net/user/remoteAccounts?oj=${encodeURIComponent(oj)}`;
+    if (ready.length === 0) {
+      const action = await vscode.window.showErrorMessage(
+        `VJudge 不允许直接向 ${oj} 提交，需要先在 VJudge 绑定自己的 ${oj} 账号并保持登录状态。`,
+        '打开账号管理',
+      );
+      if (action === '打开账号管理') {
+        void vscode.env.openExternal(vscode.Uri.parse(manageUrl));
+      }
+      return undefined;
+    }
+    const memoryKey = `vjudge.remoteAccount.${oj.toLowerCase()}`;
+    const remembered = context.globalState.get<number>(memoryKey);
+    const rememberedMatch = ready.find((item) => item.id === remembered);
+    if (rememberedMatch) {
+      return rememberedMatch.id;
+    }
+    if (ready.length === 1) {
+      await context.globalState.update(memoryKey, ready[0].id);
+      return ready[0].id;
+    }
+    const picked = await vscode.window.showQuickPick(
+      ready.map((item) => ({
+        label: item.accountDisplay || item.accountId || `账号 ${item.id}`,
+        description: `绑定 ID ${item.id}`,
+        id: item.id,
+      })),
+      { title: `选择 ${oj} 提交账号`, placeHolder: '使用哪个已绑定的远程账号提交' },
+    );
+    if (picked) {
+      await context.globalState.update(memoryKey, picked.id);
+    }
+    return picked?.id;
   };
 
   const languageForProblem = async (ref: ProblemRef): Promise<Record<string, string>> => {
@@ -1096,6 +1147,9 @@ a { color: var(--vscode-textLink-foreground); }
 
     let runId: number | undefined;
     let captcha: string | undefined;
+    let method = 0;
+    let bindingId: number | undefined;
+    let remoteAccountTried = false;
     try {
       for (let attempt = 0; attempt < 3 && runId === undefined; attempt++) {
         try {
@@ -1109,6 +1163,8 @@ a { color: var(--vscode-textLink-foreground); }
             code,
             captcha,
             open: getConfiguration('openCodePublicly', false),
+            method,
+            bindingId,
           });
         } catch (error) {
           if (error instanceof CaptchaRequiredError) {
@@ -1117,6 +1173,16 @@ a { color: var(--vscode-textLink-foreground); }
               void vscode.window.showWarningMessage('已取消提交。');
               return;
             }
+            continue;
+          }
+          if (!remoteAccountTried && isMethodNotAllowed(error)) {
+            remoteAccountTried = true;
+            const accountId = await chooseRemoteAccount(ref.oj);
+            if (accountId === undefined) {
+              return;
+            }
+            method = 1;
+            bindingId = accountId;
             continue;
           }
           throw error;

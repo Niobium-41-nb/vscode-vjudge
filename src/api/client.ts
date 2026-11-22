@@ -22,6 +22,7 @@ import {
   ProblemDetail,
   ProblemRef,
   ProblemSummary,
+  RemoteAccountBinding,
   Sample,
   SearchProblemOptions,
   Solution,
@@ -840,12 +841,13 @@ export class VJudgeClient {
 
     const response = await this.request('POST', path, {
       form: {
-        method: 0,
+        method: options.method ?? 0,
         language: options.language,
         open: options.open ? 1 : 0,
         source: options.code,
         captcha: options.captcha ?? '',
         password: '',
+        ...(options.bindingId !== undefined ? { bindingId: options.bindingId } : {}),
       },
       html: false,
       headers: { Referer: referer },
@@ -879,6 +881,42 @@ export class VJudgeClient {
       throw new VJudgeError('提交失败，请确认比赛/题目是否允许提交。', undefined, response.status);
     }
     throw new VJudgeError(`提交失败：${text.slice(0, 300)}`, undefined, response.status, text);
+  }
+
+  async listRemoteAccounts(oj: string): Promise<RemoteAccountBinding[]> {
+    const response = await this.request('GET', '/user/remoteAccounts/list', {
+      ajax: true,
+      headers: { Referer: `${VJUDGE_BASE}/user/remoteAccounts?oj=${encodeURIComponent(oj)}` },
+      query: { oj },
+    });
+    const data = this.ensureSuccessJson(response, '无法获取远程 OJ 账号列表');
+    const record = data && typeof data === 'object' ? (data as Record<string, unknown>) : undefined;
+    if (record && (record.error !== undefined || record.errorKey !== undefined)) {
+      throw makeClientError(data, response.status, '无法获取远程 OJ 账号列表。');
+    }
+    const raw = record && Array.isArray(record.bindings)
+      ? record.bindings
+      : Array.isArray(data)
+        ? data
+        : [];
+    const bindings: RemoteAccountBinding[] = [];
+    for (const item of raw) {
+      if (!item || typeof item !== 'object') {
+        continue;
+      }
+      const entry = item as Record<string, unknown>;
+      const id = Number(entry.id);
+      if (!Number.isFinite(id) || id <= 0) {
+        continue;
+      }
+      bindings.push({
+        id,
+        accountId: typeof entry.accountId === 'string' ? entry.accountId : undefined,
+        accountDisplay: typeof entry.accountDisplay === 'string' ? entry.accountDisplay : undefined,
+        runtimeStatus: typeof entry.runtimeStatus === 'string' ? entry.runtimeStatus : undefined,
+      });
+    }
+    return bindings;
   }
 
   async getCaptcha(): Promise<{ dataUrl: string; mime: string }> {

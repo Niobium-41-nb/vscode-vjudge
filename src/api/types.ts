@@ -228,4 +228,13 @@ export interface SubmitOptions {
   code: string;
   captcha?: string;
   open?: boolean;
+  method?: number;
+  bindingId?: number;
+}
+
+export interface RemoteAccountBinding {
+  id: number;
+  accountId?: string;
+  accountDisplay?: string;
+  runtimeStatus?: string;
 }

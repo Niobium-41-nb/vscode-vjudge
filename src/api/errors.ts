@@ -35,6 +35,7 @@ const translations: Record<string, string> = {
   'submit.error.invalid_captcha': '验证码错误，请重试。',
   'submit.error.source_too_long': '代码长度超出限制。',
   'submit.error.problem_not_found': '题目不存在或不可提交。',
+  'submit.error.submit_method_not_allowed': '该平台需要通过绑定的远程账号提交，VJudge 不允许使用默认通道。',
   'submit.error.contest_not_started': '比赛尚未开始。',
   'submit.error.contest_ended': '比赛已经结束。',
   'own_account.error.invalid': '远程 OJ 账号未绑定或已失效，请先在 VJudge 绑定对应 OJ 账号。',
@@ -64,6 +65,9 @@ export function translateI18n(key: string | undefined): string | undefined {
   if (key.endsWith('invalid_credentials')) {
     return '用户名或密码错误。';
   }
+  if (key.endsWith('submit_method_not_allowed')) {
+    return '该平台需要通过绑定的远程账号提交，VJudge 不允许使用默认通道。';
+  }
   const tail = key.split('.').filter(Boolean).pop();
   return tail ? `操作失败（${tail}）。` : '操作失败。';
 }
@@ -75,6 +79,9 @@ export function extractI18nKey(data: unknown): string | undefined {
   const record = data as Record<string, unknown>;
   if (typeof record.i18nKey === 'string') {
     return record.i18nKey;
+  }
+  if (typeof record.errorKey === 'string') {
+    return record.errorKey;
   }
   if (record.error && typeof record.error === 'object') {
     const error = record.error as Record<string, unknown>;

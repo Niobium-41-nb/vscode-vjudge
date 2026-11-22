@@ -2,9 +2,17 @@
   "name": "vjudge",
   "displayName": "VJudge",
   "description": "在 VS Code 中浏览 VJudge 题目、阅读题面、提交代码并查看评测结果。",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "publisher": "niobium-41-nb",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Niobium-41-nb/vscode-vjudge.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Niobium-41-nb/vscode-vjudge/issues"
+  },
+  "homepage": "https://github.com/Niobium-41-nb/vscode-vjudge#readme",
   "icon": "resources/icon.png",
   "engines": {
     "vscode": "^1.85.0"

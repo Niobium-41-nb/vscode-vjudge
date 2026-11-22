@@ -12,6 +12,7 @@ export interface ProblemRef {
   descBriefs?: DescriptionBrief[];
   enabledDescKeys?: number[];
   properties?: ProblemProperty[];
+  submitMethods?: boolean[];
   solvedState?: SolveState;
 }
 
@@ -70,6 +71,7 @@ export interface ContestProblem {
   enabledDescKeys?: number[];
   descBriefs?: DescriptionBrief[];
   properties?: ProblemProperty[];
+  submitMethods?: boolean[];
   weight?: number;
 }
 
@@ -150,6 +152,7 @@ export interface ProblemDetail {
   allowSubmit?: boolean;
   status?: number;
   properties?: ProblemProperty[];
+  submitMethods?: boolean[];
 }
 
 export interface Sample {
@@ -237,4 +240,6 @@ export interface RemoteAccountBinding {
   accountId?: string;
   accountDisplay?: string;
   runtimeStatus?: string;
+  healthStatus?: string;
+  statusReason?: string;
 }

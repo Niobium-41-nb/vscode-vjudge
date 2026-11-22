@@ -7,7 +7,7 @@
 - 目标：在 VS Code 中完成 VJudge（https://vjudge.net/）的题目浏览/搜索、题面阅读、代码提交、评测轮询、提交记录、比赛题目、题单（workbook）和本地样例测试。
 - 技术栈：TypeScript + VS Code Extension API，CommonJS 输出到 `out/`，入口 `out/extension.js`。
 - 运行时零第三方依赖；只用 Node 内置模块（`https`、`child_process`、`fs`、`crypto` 等）。
-- 当前版本 `0.2.3`，产物 `vjudge-0.2.3.vsix`（不纳入版本控制）。
+- 当前版本 `0.2.5`，产物 `vjudge-0.2.5.vsix`（不纳入版本控制）。
 - 所有界面文案、错误提示、注释使用中文；不要引入 emoji。
 
 ## 2. 常用命令
@@ -107,8 +107,8 @@ VS Code UI（TreeView / Webview / Notification / StatusBar）
 | `GET /contest/{id}` | 比赛详情 HTML | `<textarea>` 内 JSON，`problems[]` 含 `pid,oj,probNum,num,title,languages,descBriefs,enabledDescKeys,properties`；公开比赛可匿名访问 |
 | `GET /problem/{oj}-{probNum}` | 题目详情 HTML | **通常要求登录**（重定向含 `login=1`）；解析 title/languages/descriptions |
 | `GET /problem/description/{key}?{version}` | 题面 HTML | 公开题面可匿名；版本号直接拼在 `?` 后，可省略；正常页面可能内联 Cloudflare 探测脚本 |
-| `POST /problem/submit/{oj}-{probNum}` 或 `/contest/submit/{contestId}/{num}` | 提交 | 表单 `method=0,language,open=0/1,source=源码原文,captcha,password=''`（`source` 直接传原文，仅由表单做 URL 编码；2026-11 起网页端不再 base64 编码，传 base64 会被当成源码导致 CE）；`method=1` 时额外带 `bindingId`（使用自己绑定的远程 OJ 账号）；Codeforces 等平台拒绝 `method=0` 并返回 `submit_method_not_allowed`；返回 `{runId}`、`{captcha:true}` 或错误 |
-| `GET /user/remoteAccounts/list?oj=CF` | 远程 OJ 账号列表 | 返回 `{bindings:[{id,accountId,accountDisplay,runtimeStatus,...}]}`；只有 `runtimeStatus=READY` 的绑定可提交；未登录返回 `{"errorKey":"user.remote_accounts.error.login_required"}` |
+| `POST /problem/submit/{oj}-{probNum}` 或 `/contest/submit/{contestId}/{num}` | 提交 | 表单 `method=0,language,open=0/1,source=源码原文,captcha,password=''`（`source` 直接传原文，仅由表单做 URL 编码；2026-11 起网页端不再 base64 编码，传 base64 会被当成源码导致 CE）；`method=1` 时额外带 `bindingId`（使用自己绑定的远程 OJ 账号）；提交方式以题目/比赛 JSON 的 `submitMethods` 为准（数组顺序为默认通道、个人账号、归档），Codeforces 等平台返回 `[false,true,true]`，插件据此直接走个人账号；仍收到 `submit_method_not_allowed` 时回退重试；相同代码重复提交返回 `submit.error.duplicate_code`（“这份代码之前已经提交过。”）；返回 `{runId}`、`{captcha:true}` 或错误 |
+| `GET /user/remoteAccounts/list?oj=CF` | 远程 OJ 账号列表 | 返回 `{groups:{<OJ>:{bindings:[{id,accountId,accountDisplay,runtimeStatus,healthStatus,statusReason,...}]}}}`；按 `oj` 过滤，客户端优先取同名 group，否则合并全部 group；只有 `runtimeStatus=READY` 的绑定可提交；未登录返回 `{"errorKey":"user.remote_accounts.error.login_required"}` |
 | `GET /util/captcha?{timestamp}` | 验证码图片 | 需要登录；必须校验 `Content-Type: image/*`（未登录会返回 HTML） |
 | `GET /solution/data/{runId}` | 评测详情 JSON | 含 `status,statusType,processing,runtime,memory,additionalInfo,code/source` |
 | `GET /status/data` | 提交列表 DataTables | 参数 `draw,start,length,un,OJId,probNum,res,language,onlyFollowee`；行是对象（`runId,status,statusType,processing,oj,probNum,time,language,...`）；`oj` 是显示名（如“洛谷”） |
@@ -161,7 +161,7 @@ VS Code UI（TreeView / Webview / Notification / StatusBar）
 2. 取当前编辑器/映射文件，保存脏文件，代码不能为空。
 3. 语言：`ProblemRef.languages` 或题面缓存；仍为空时 `languageForProblem` 再尝试一次题目详情页；QuickPick 记忆在 globalState `vjudge.lastLanguage`，优先于 `vjudge.defaultLanguage`；无列表时允许手输（默认 `GNU G++17`）。
 4. 提交循环最多 3 次，遇 `CaptchaRequiredError` 弹验证码 Webview（可刷新/取消）；`open` 取 `vjudge.openCodePublicly`。
-5. 首次用 `method=0`（VJudge 默认通道）提交；若返回 `submit_method_not_allowed`（Codeforces 等平台要求使用自己绑定的账号），改为 `method=1` 并带 `bindingId` 重试。`bindingId` 来自 `/user/remoteAccounts/list` 中 `runtimeStatus=READY` 的绑定：只有一个时直接使用，多个时 QuickPick（按 OJ 记忆上次选择，globalState `vjudge.remoteAccount.<oj>`），没有可用绑定时提示到 `/user/remoteAccounts?oj=<oj>` 绑定账号。
+5. 提交方式以题目/比赛 JSON 的 `submitMethods`（`[默认通道, 个人账号, 归档]`）为准：`submitMethods[0] !== true`（Codeforces 为 `[false,true,true]`）或 globalState `vjudge.remoteRequired.<oj>` 为真时，直接 `method=1` 并带 `bindingId`，不再先发必被拒绝的 `method=0`（同一份源码先失败一次可能被服务端记为重复提交，随后报 `duplicate_code`）；只有仍返回 `submit_method_not_allowed` 时才回退重试。`bindingId` 来自 `/user/remoteAccounts/list` 中 `runtimeStatus=READY` 的绑定：只有一个时直接使用，多个时 QuickPick（按 OJ 记忆上次选择，globalState `vjudge.remoteAccount.<oj>`），没有可用绑定时提示到 `/user/remoteAccounts?oj=<oj>` 绑定账号。
 6. 成功后每 1.2 秒轮询 `/solution/data/{runId}`，最长 5 分钟；非 `processing` 且 `statusType !== 2` 即结束。
 7. 结果：通过弹信息；失败可“查看详情”（`additionalInfo` 经 `sanitizeStatementHtml` 后放入禁用脚本的 Webview）；无论结果如何都刷新提交列表。
 
@@ -255,7 +255,7 @@ VS Code UI（TreeView / Webview / Notification / StatusBar）
 | 配置 | `vjudge.languageTemplates` | 语言→模板文件路径；键可为扩展名（`cpp`、`.py`）或提交语言名（`GNU G++17`），值为绝对路径或相对首个工作区的路径；优先级高于全局模板；支持 `${title}`、`${oj}`、`${probNum}` |
 | 配置（CPH） | `cph.general.saveLocation` | 只读；CPH 自定义保存目录，导入时一并扫描 |
 | SecretStorage | `vjudge.password` / `vjudge.cookies` | 敏感信息 |
-| globalState | `vjudge.username` / `vjudge.lastLanguage` / `vjudge.remoteAccount.<oj>` | 用户名缓存 / 上次提交语言 / 各 OJ 上次使用的远程账号绑定 ID |
+| globalState | `vjudge.username` / `vjudge.lastLanguage` / `vjudge.remoteAccount.<oj>` / `vjudge.remoteRequired.<oj>` | 用户名缓存 / 上次提交语言 / 各 OJ 上次使用的远程账号绑定 ID / 该 OJ 只能使用个人账号提交（`submitMethods[0]` 为假或收到过 `submit_method_not_allowed`） |
 | workspaceState | `vjudge.cphFiles` / `vjudge.cphSources` | 已导入 CPH `.prob` 文件路径数组 / 源码文件到 `.prob` 的关联 |
 | 上下文键 | `vjudge.loggedIn` | 控制欢迎页和菜单 |
 | contextValue | `vjudge.problem` / `vjudge.contest` / `vjudge.submission` / `vjudge.workbook` / `vjudge.workbookCategory` / `vjudge.info` | 右键/内联菜单匹配 |
@@ -289,7 +289,7 @@ VS Code UI（TreeView / Webview / Notification / StatusBar）
 - **调整数学渲染**：`statementPanel.ts` 的 `SCRIPT`（`SYMBOLS`、`parseCommand`、`parseEnvironment`）；保持 `String.raw` 写法避免转义丢失，渲染后加 `.mj` 类；正文跳过样例区，`pre/code` 只处理显式 `\(...\)`/`\[...\]`，不处理 `$`。Codeforces 的三重/六重美元定界符在 `parser.ts#normalizeCodeforcesMath`（由 `sanitizeStatementHtml` 调用）里归一化，新增定界符时同时改这里和 `scripts/check-parsers.js` 的“Codeforces 公式定界符”检查。
 - **调整题单**：`views/workbooks.ts`（分类状态、分页、详情缓存）+ `api/parser.ts#parseWorkbookDetail`（正文顺序、brief 兜底、`content/nodeId`）；新增字段先改 `WorkbookSummary`/`WorkbookDetail`，再改 `client.listWorkbooks` 的行映射。创建/更新走 `client.createWorkbook/updateWorkbook`（共享 `saveWorkbook`），题目集合由 `content` 中的 `[problem:...]` 标记决定；`commands.ts` 的 `parseProblemTokens/appendProblemMarkers` 负责解析与追加，更新时必须回传 `nodeId`。
 - **调整提交/轮询**：`client.submit`、`commands.pollSolution`；注意验证码重试上限与取消路径。
-- **错误提示**：命令层统一用 `reportError(prefix, error)`，登录类错误会提示“重新登录”；新增错误 kind 时同步 `errors.ts`。
+- **错误提示**：命令层统一用 `reportError(prefix, error)`，登录类错误会提示“重新登录”；新增错误 kind 时同步 `errors.ts`。面向用户的文案不得直接暴露服务端错误键（如 `duplicate_code`），未识别的键统一显示为通用提示，原始键与 HTTP 状态由 `reportError` 写入输出通道；`duplicate_code` 在提交命令里单独弹出带“查看提交记录”按钮的说明。
 
 ## 12. 验证与打包
 
@@ -378,7 +378,8 @@ npm run package
 30. **Markdown 渲染是子集实现**：覆盖 VJudge/洛谷常见语法，但复杂表格、脚注、HTML 内嵌 Markdown、引用内多段惰性续行等不保证与网页端完全一致；无法识别的语法按普通文本输出。公式不做语法校验，仍交给 Webview 的 TeX 子集渲染器。
 31. **题面附件只识别 `[pdf:]` 标记**：VJudge 前端只有这一种文件标记，普通正文里的 `<a href>` 仍按链接处理，不会生成下载卡片。“在线预览”调用系统浏览器（浏览器原生 PDF 查看器），扩展内不能内嵌 PDF。下载需要用户在保存对话框中确认路径，默认固定 `.pdf` 扩展名；上限 50 MB、30 秒超时、最多 3 次重定向，CDN 返回 HTML（如验证页/错误页）会判定失败。附件地址不携带登录 Cookie，私有资源可能无法下载。
 32. **附件链接不受 Cookie 保护**：下载复用 `https` 直连与 `CDN_BASE_URL` 规则，仅限 HTTP(S)，不读取工作区设置中的代理；网络受限环境下需自行保证 CDN 可达。
-33. **Codeforces 等平台必须用远程账号提交**：服务端对 `method=0` 返回 `submit_method_not_allowed`，插件会自动改为绑定的远程账号（`method=1` + `bindingId`）。前提是已在 VJudge 的 `/user/remoteAccounts` 绑定对应 OJ 账号且状态为 `READY`；绑定账号在 OJ 端掉登录时提交会失败，需要重新在 VJudge 上登录该远程账号。
+33. **Codeforces 等平台必须用远程账号提交**：服务端对 `method=0` 返回 `submit_method_not_allowed`。插件优先读题目/比赛 JSON 的 `submitMethods` 直接选个人账号；元数据缺失且收到该错误时自动回退（`method=1` + `bindingId`），并把 OJ 记入 globalState `vjudge.remoteRequired.<oj>`。前提是已在 VJudge 的 `/user/remoteAccounts` 绑定对应 OJ 账号且状态为 `READY`；绑定账号在 OJ 端掉登录时提交会失败，需要重新在 VJudge 上登录该远程账号。
+34. **相同代码会被拒绝**：VJudge 对同一用户同一题目的重复源码返回 `submit.error.duplicate_code`（“这份代码之前已经提交过。”），被拒的尝试也可能计入；插件已避免对需要个人账号的 OJ 先发 `method=0`。需要重试时修改一行注释或空行，或更换提交语言。
 
 ## 14. 术语
 

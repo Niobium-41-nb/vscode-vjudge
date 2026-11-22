@@ -97,6 +97,7 @@ export class ContestsProvider implements vscode.TreeDataProvider<ContestsNode>, 
         descBriefs: problem.descBriefs,
         enabledDescKeys: problem.enabledDescKeys,
         properties: problem.properties,
+        submitMethods: problem.submitMethods,
         problemId: problem.pid,
       }));
       this.session.applyCachedSolveStates(refs);

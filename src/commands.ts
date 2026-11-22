@@ -225,6 +225,11 @@ export function registerCommands(deps: CommandDeps): vscode.Disposable[] {
 
   const reportError = async (prefix: string, error: unknown): Promise<void> => {
     const message = `${prefix}${describeError(error)}`;
+    if (error instanceof VJudgeError && error.i18nKey) {
+      output.appendLine(
+        `[VJudge] ${prefix}错误键：${error.i18nKey}${error.status ? `（HTTP ${error.status}）` : ''}`,
+      );
+    }
     if (error instanceof VJudgeError && error.kind === 'login') {
       const choice = await vscode.window.showErrorMessage(message, '重新登录');
       if (choice === '重新登录') {
@@ -320,6 +325,48 @@ export function registerCommands(deps: CommandDeps): vscode.Disposable[] {
     return /submit_method_not_allowed$/i.test(key);
   };
 
+  const remoteRequiredKey = (oj: string): string => `vjudge.remoteRequired.${oj.toLowerCase()}`;
+  const markRemoteRequired = async (oj: string): Promise<void> => {
+    await context.globalState.update(remoteRequiredKey(oj), true);
+  };
+  const requiresRemoteAccount = async (ref: ProblemRef): Promise<boolean> => {
+    if (ref.submitMethods && ref.submitMethods.length > 0) {
+      if (ref.submitMethods[0] !== true) {
+        await markRemoteRequired(ref.oj);
+        return true;
+      }
+      return false;
+    }
+    return context.globalState.get<boolean>(remoteRequiredKey(ref.oj)) === true;
+  };
+
+  const remoteStatusLabel = (item: RemoteAccountBinding): string => {
+    const runtime = (item.runtimeStatus ?? '').toUpperCase();
+    if (runtime === 'READY') {
+      return '可用';
+    }
+    if (runtime === 'REQUIRES_UNLOCK') {
+      return '已锁定';
+    }
+    const health = (item.healthStatus ?? '').toUpperCase();
+    if (health === 'NORMAL') {
+      return '正常';
+    }
+    if (health === 'WARNING') {
+      return '异常';
+    }
+    if (health === 'BROKEN') {
+      return '已失效';
+    }
+    if (health === 'INCOMPLETE') {
+      return '信息不完整';
+    }
+    if (health === 'INVALID') {
+      return item.statusReason ? `失效（${item.statusReason}）` : '失效';
+    }
+    return runtime || health || '状态未知';
+  };
+
   const chooseRemoteAccount = async (oj: string): Promise<number | undefined> => {
     let bindings: RemoteAccountBinding[];
     try {
@@ -331,12 +378,19 @@ export function registerCommands(deps: CommandDeps): vscode.Disposable[] {
     const ready = bindings.filter(
       (item) => !item.runtimeStatus || item.runtimeStatus.toUpperCase() === 'READY',
     );
+    output.appendLine(
+      `[VJudge] ${oj} 远程账号：${bindings.length > 0
+        ? bindings.map((item) => `#${item.id} ${remoteStatusLabel(item)}`).join('，')
+        : '未绑定'}`,
+    );
     const manageUrl = `https://vjudge.net/user/remoteAccounts?oj=${encodeURIComponent(oj)}`;
     if (ready.length === 0) {
-      const action = await vscode.window.showErrorMessage(
-        `VJudge 不允许直接向 ${oj} 提交，需要先在 VJudge 绑定自己的 ${oj} 账号并保持登录状态。`,
-        '打开账号管理',
-      );
+      const hint = bindings.length === 0
+        ? `VJudge 不允许直接向 ${oj} 提交，需要先在 VJudge 绑定自己的 ${oj} 账号并保持登录状态。`
+        : `已绑定 ${bindings.length} 个 ${oj} 账号，但当前都不可用（${bindings
+            .map((item) => remoteStatusLabel(item))
+            .join('、')}），请在 VJudge 重新登录或解锁该远程账号。`;
+      const action = await vscode.window.showErrorMessage(hint, '打开账号管理');
       if (action === '打开账号管理') {
         void vscode.env.openExternal(vscode.Uri.parse(manageUrl));
       }
@@ -1150,6 +1204,15 @@ a { color: var(--vscode-textLink-foreground); }
     let method = 0;
     let bindingId: number | undefined;
     let remoteAccountTried = false;
+    if (await requiresRemoteAccount(ref)) {
+      const accountId = await chooseRemoteAccount(ref.oj);
+      if (accountId === undefined) {
+        return;
+      }
+      method = 1;
+      bindingId = accountId;
+      remoteAccountTried = true;
+    }
     try {
       for (let attempt = 0; attempt < 3 && runId === undefined; attempt++) {
         try {
@@ -1177,6 +1240,7 @@ a { color: var(--vscode-textLink-foreground); }
           }
           if (!remoteAccountTried && isMethodNotAllowed(error)) {
             remoteAccountTried = true;
+            await markRemoteRequired(ref.oj);
             const accountId = await chooseRemoteAccount(ref.oj);
             if (accountId === undefined) {
               return;
@@ -1189,6 +1253,19 @@ a { color: var(--vscode-textLink-foreground); }
         }
       }
     } catch (error) {
+      if (error instanceof VJudgeError && /duplicate_code$/i.test(error.i18nKey ?? '')) {
+        output.appendLine(`[VJudge] 提交被判定为重复代码：${ref.oj}-${ref.probNum}`);
+        const action = await vscode.window.showWarningMessage(
+          '提交失败：VJudge 判定这份代码与该题之前提交过的代码完全相同，已拒绝重复提交。请修改代码（例如加一行注释或空行）或更换提交语言后再试。',
+          '查看提交记录',
+        );
+        if (action === '查看提交记录') {
+          submissions.refresh();
+          void submissions.reload(true);
+          await vscode.commands.executeCommand('vjudge.submissions.focus');
+        }
+        return;
+      }
       await reportError('提交失败：', error);
       return;
     }

@@ -67,6 +67,51 @@ if (descriptionHtml) {
   check('图片链接被绝对化', !/\ssrc\s*=\s*(["'])\/(?!\/)/i.test(sanitized));
 }
 
+console.log('提交方式元数据');
+const submitContestPage = `<html><body><textarea name="dataJson">${JSON.stringify({
+  id: 1,
+  title: '测试比赛',
+  problems: [
+    {
+      pid: 1,
+      oj: 'CodeForces',
+      probNum: '4A',
+      num: 'A',
+      title: 'Watermelon',
+      languages: {},
+      submitMethods: [false, true, true],
+    },
+  ],
+})}</textarea></body></html>`;
+const submitContest = parser.parseContestDetail(submitContestPage);
+check(
+  '比赛题目解析 submitMethods',
+  JSON.stringify(submitContest.problems[0]?.submitMethods) === '[false,true,true]',
+  JSON.stringify(submitContest.problems[0]?.submitMethods),
+);
+const submitProblemPage = `<html><body><textarea name="dataJson">${JSON.stringify({
+  problemId: 4,
+  languages: {},
+  descBriefs: [],
+  submitMethods: [false, true, false],
+})}</textarea></body></html>`;
+const submitProblemDetail = parser.parseProblemDetail(submitProblemPage, 'CodeForces', '4A');
+check(
+  '题目页解析 submitMethods',
+  JSON.stringify(submitProblemDetail.submitMethods) === '[false,true,false]',
+  JSON.stringify(submitProblemDetail.submitMethods),
+);
+const noSubmitMethods = parser.parseProblemDetail(
+  `<html><body><textarea name="dataJson">${JSON.stringify({
+    problemId: 5,
+    languages: {},
+    descBriefs: [],
+  })}</textarea></body></html>`,
+  'OJ',
+  '1',
+);
+check('缺少 submitMethods 时为 undefined', noSubmitMethods.submitMethods === undefined);
+
 console.log('题面图片');
 const cdnSanitized = parser.sanitizeStatementHtml(
   '<p><img src="CDN_BASE_URL/9bfcfa2c04f927659b197ee6d71211ae" style="max-width:100%"></p>',

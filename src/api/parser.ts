@@ -559,6 +559,14 @@ function readAttribute(tag: string, name: string): string {
   return decodeEntities(match[1] ?? match[2] ?? match[3] ?? '');
 }
 
+function normalizeSubmitMethods(value: unknown): boolean[] | undefined {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+  const methods = value.map((item) => item === true);
+  return methods.length > 0 ? methods : undefined;
+}
+
 export function parseContestDetail(html: string): ContestDetail {
   const data = extractTextareaJson<Record<string, unknown>>(
     html,
@@ -582,6 +590,7 @@ export function parseContestDetail(html: string): ContestDetail {
       ? (problem.descBriefs as DescriptionBrief[]).filter((brief) => !!brief && Number.isFinite(Number(brief.key)))
       : undefined,
     properties: Array.isArray(problem.properties) ? (problem.properties as ProblemProperty[]) : undefined,
+    submitMethods: normalizeSubmitMethods(problem.submitMethods),
     weight: Number(problem.weight ?? 1),
   }));
 
@@ -630,6 +639,7 @@ export function parseProblemDetail(html: string, oj: string, probNum: string): P
     allowSubmit: data.allowSubmit !== false,
     status: data.status !== undefined ? Number(data.status) : undefined,
     properties: Array.isArray(data.properties) ? (data.properties as ProblemProperty[]) : undefined,
+    submitMethods: normalizeSubmitMethods(data.submitMethods),
   };
 }
 

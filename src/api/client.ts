@@ -772,6 +772,9 @@ export class VJudgeClient {
         if (descriptions.length === 0) {
           descriptions = detail.descriptions;
         }
+        if (!ref.submitMethods && detail.submitMethods) {
+          ref.submitMethods = detail.submitMethods;
+        }
       } catch (error) {
         // 已有题面引用时，标题/语言补全失败不应阻断题面加载。
         if (descriptions.length === 0) {
@@ -863,7 +866,7 @@ export class VJudgeClient {
       if (record.captcha === true) {
         throw new CaptchaRequiredError('提交需要输入验证码。', undefined, response.status, data);
       }
-      if (record.error) {
+      if (record.error || typeof record.errorCode === 'string') {
         const key = extractI18nKey(data);
         if (key && /captcha/i.test(key)) {
           throw new CaptchaRequiredError(translateI18n(key) ?? '验证码错误，请重试。', key, response.status, data);
@@ -880,7 +883,12 @@ export class VJudgeClient {
     if (response.status === 400 || /<!doctype/i.test(text)) {
       throw new VJudgeError('提交失败，请确认比赛/题目是否允许提交。', undefined, response.status);
     }
-    throw new VJudgeError(`提交失败：${text.slice(0, 300)}`, undefined, response.status, text);
+    throw new VJudgeError(
+      '提交失败：VJudge 返回了无法识别的内容，请稍后在网页端确认提交状态。',
+      undefined,
+      response.status,
+      text,
+    );
   }
 
   async listRemoteAccounts(oj: string): Promise<RemoteAccountBinding[]> {
@@ -894,11 +902,7 @@ export class VJudgeClient {
     if (record && (record.error !== undefined || record.errorKey !== undefined)) {
       throw makeClientError(data, response.status, '无法获取远程 OJ 账号列表。');
     }
-    const raw = record && Array.isArray(record.bindings)
-      ? record.bindings
-      : Array.isArray(data)
-        ? data
-        : [];
+    const raw = this.remoteBindingRows(record, Array.isArray(data) ? data : [], oj);
     const bindings: RemoteAccountBinding[] = [];
     for (const item of raw) {
       if (!item || typeof item !== 'object') {
@@ -914,9 +918,39 @@ export class VJudgeClient {
         accountId: typeof entry.accountId === 'string' ? entry.accountId : undefined,
         accountDisplay: typeof entry.accountDisplay === 'string' ? entry.accountDisplay : undefined,
         runtimeStatus: typeof entry.runtimeStatus === 'string' ? entry.runtimeStatus : undefined,
+        healthStatus: typeof entry.healthStatus === 'string' ? entry.healthStatus : undefined,
+        statusReason: typeof entry.statusReason === 'string' ? entry.statusReason : undefined,
       });
     }
     return bindings;
+  }
+
+  private remoteBindingRows(
+    record: Record<string, unknown> | undefined,
+    fallback: unknown[],
+    oj: string,
+  ): unknown[] {
+    const groups = record?.groups;
+    if (groups && typeof groups === 'object') {
+      const entries = Object.entries(groups as Record<string, unknown>);
+      const matched = entries.find(([key]) => key.toLowerCase() === oj.toLowerCase());
+      const rows: unknown[] = [];
+      for (const [, group] of matched ? [matched] : entries) {
+        const list = group && typeof group === 'object'
+          ? (group as Record<string, unknown>).bindings
+          : undefined;
+        if (Array.isArray(list)) {
+          rows.push(...list);
+        }
+      }
+      if (entries.length > 0) {
+        return rows;
+      }
+    }
+    if (record && Array.isArray(record.bindings)) {
+      return record.bindings;
+    }
+    return fallback;
   }
 
   async getCaptcha(): Promise<{ dataUrl: string; mime: string }> {

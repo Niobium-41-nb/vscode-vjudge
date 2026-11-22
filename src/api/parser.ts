@@ -817,8 +817,54 @@ export function isChallengePage(html: string): boolean {
 
 const VJUDGE_CDN_BASE = 'https://cdn.vjudge.net.cn/';
 
-export function sanitizeStatementHtml(html: string): string {
+function resolveStatementFileUrl(raw: string): string | undefined {
+  const url = raw.trim();
+  if (!url) {
+    return undefined;
+  }
+  let resolved = url;
+  if (/^CDN_BASE_URL\//i.test(url)) {
+    resolved = `${VJUDGE_CDN_BASE}${url.slice('CDN_BASE_URL/'.length)}`;
+  } else if (url.startsWith('//')) {
+    resolved = `https:${url}`;
+  } else if (url.startsWith('/')) {
+    resolved = `https://vjudge.net${url}`;
+  }
+  return /^https?:\/\//i.test(resolved) ? resolved : undefined;
+}
+
+function statementFileHtml(url: string, index: number): string {
+  const label = `题面附件 ${index + 1}`;
+  return [
+    `<span class="vj-file" data-vj-url="${escapeHtml(url)}" data-vj-index="${index}">`,
+    '<span class="vj-file-kind">PDF</span>',
+    `<span class="vj-file-label">${escapeHtml(label)}</span>`,
+    '<button type="button" class="vj-file-action secondary" data-vj-action="preview">在线预览</button>',
+    '<button type="button" class="vj-file-action" data-vj-action="download">下载到本地</button>',
+    '</span>',
+  ].join('');
+}
+
+const CODE_SEGMENT = /(<pre\b[\s\S]*?<\/pre>|<code\b[\s\S]*?<\/code>)/gi;
+
+// Codeforces 题面用 $$$...$$$ 表示行内公式、$$$$$$...$$$$$$ 表示行间公式。
+// 统一换成 Webview 能识别的 \(...\) / \[...\]，代码块内的美元符号保持原样。
+function normalizeCodeforcesMath(html: string): string {
   return html
+    .split(CODE_SEGMENT)
+    .map((part, index) =>
+      index % 2 === 1
+        ? part
+        : part
+            .replace(/\${6}([\s\S]+?)\${6}/g, (_match, body: string) => `\\[${body}\\]`)
+            .replace(/\${3}([\s\S]+?)\${3}/g, (_match, body: string) => `\\(${body}\\)`),
+    )
+    .join('');
+}
+
+export function sanitizeStatementHtml(html: string): string {
+  let fileIndex = 0;
+  return normalizeCodeforcesMath(html)
     .replace(/<!--[\s\S]*?-->/g, '')
     .replace(/<script\b[\s\S]*?<\/script>/gi, '')
     .replace(/<style\b[\s\S]*?<\/style>/gi, '')
@@ -828,6 +874,10 @@ export function sanitizeStatementHtml(html: string): string {
     .replace(/<iframe\b[\s\S]*?<\/iframe>/gi, '')
     .replace(/<object\b[\s\S]*?<\/object>/gi, '')
     .replace(/<embed\b[^>]*>/gi, '')
+    .replace(/\[pdf:([^\]\s]+)\]/gi, (match, url: string) => {
+      const resolved = resolveStatementFileUrl(url);
+      return resolved ? statementFileHtml(resolved, fileIndex++) : match;
+    })
     .replace(/<form\b[^>]*>/gi, '<div>')
     .replace(/<\/form>/gi, '</div>')
     .replace(/\son\w+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, '')

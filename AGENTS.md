@@ -42,6 +42,7 @@ npm run package        # npx @vscode/vsce package --no-dependencies，生成 VSI
 | `src/cph.ts` | 扫描 `.cph`/自定义保存目录、用题面样例生成 `.prob`、持久化 CPH 题目路径、按源文件匹配 |
 | `src/templates.ts` | OJ 语言名 → 文件扩展名/代码模板；自定义模板键匹配与占位符替换；内置全局模板文件清单；文件名安全化 |
 | `src/globalTemplates.ts` | 在扩展全局存储目录创建/读取可编辑的语言模板文件 |
+| `src/fileTransfer.ts` | 题面附件的 HTTPS 流式下载、保存对话框、进度与取消、`revealFileInOS` |
 | `src/sampleRunner.ts` | 本地编译/运行、逐样例比较、超时杀进程树、输出日志 |
 | `src/views/problems.ts` | 题目搜索分页 TreeDataProvider |
 | `src/views/contests.ts` | 我的比赛及按需加载赛题 |
@@ -106,7 +107,7 @@ VS Code UI（TreeView / Webview / Notification / StatusBar）
 | `GET /contest/{id}` | 比赛详情 HTML | `<textarea>` 内 JSON，`problems[]` 含 `pid,oj,probNum,num,title,languages,descBriefs,enabledDescKeys,properties`；公开比赛可匿名访问 |
 | `GET /problem/{oj}-{probNum}` | 题目详情 HTML | **通常要求登录**（重定向含 `login=1`）；解析 title/languages/descriptions |
 | `GET /problem/description/{key}?{version}` | 题面 HTML | 公开题面可匿名；版本号直接拼在 `?` 后，可省略；正常页面可能内联 Cloudflare 探测脚本 |
-| `POST /problem/submit/{oj}-{probNum}` 或 `/contest/submit/{contestId}/{num}` | 提交 | 表单 `method=0,language,open=0/1,source=base64(encodeURIComponent(code)),captcha,password=''`；返回 `{runId}`、`{captcha:true}` 或错误 |
+| `POST /problem/submit/{oj}-{probNum}` 或 `/contest/submit/{contestId}/{num}` | 提交 | 表单 `method=0,language,open=0/1,source=源码原文,captcha,password=''`（`source` 直接传原文，仅由表单做 URL 编码；2026-11 起网页端不再 base64 编码，传 base64 会被当成源码导致 CE）；返回 `{runId}`、`{captcha:true}` 或错误 |
 | `GET /util/captcha?{timestamp}` | 验证码图片 | 需要登录；必须校验 `Content-Type: image/*`（未登录会返回 HTML） |
 | `GET /solution/data/{runId}` | 评测详情 JSON | 含 `status,statusType,processing,runtime,memory,additionalInfo,code/source` |
 | `GET /status/data` | 提交列表 DataTables | 参数 `draw,start,length,un,OJId,probNum,res,language,onlyFollowee`；行是对象（`runId,status,statusType,processing,oj,probNum,time,language,...`）；`oj` 是显示名（如“洛谷”） |
@@ -149,8 +150,9 @@ VS Code UI（TreeView / Webview / Notification / StatusBar）
 7. 缓存键 = `oj-probNum[@contestId/contestNum]#描述ID`（小写），TTL 5 分钟，并发请求合并；切换题面复用同一缓存，登录变化/注销时清空。
 8. 题面 Webview 渲染前**再清洗一次**；若已有独立样例区，移除正文中的 `vjudge_sample`/`sample-test` 表格，避免重复。
 9. 题面 Webview 顶部渲染“题面列表（N）”，显示作者、官方标记、语言与更新日期，点击通过 `{type:'description', id}` 切换；当前描述高亮。加载失败时列表仍可用，同时保留“在浏览器打开 / 复制题目链接 / 刷新题面”。
-10. 数学公式由 Webview 内置的 TeX 子集渲染器处理（`\(...\)`、`\[...\]`、`$...$`、`$$...$$`），支持常用符号、上下标、分式、根号、`\sum`/`\int`、`\text`、`cases` 等环境；不引入 KaTeX/MathJax，不联网。正文跳过 `script/style/textarea/.samples/.mj`；`pre`/`code` 内只识别显式 `\(...\)`、`\[...\]`，不解析 `$`，避免误伤代码与 shell 变量。渲染后的节点加 `.mj` 防止重复处理。新增符号改 `statementPanel.ts` 的 `SYMBOLS` 或 `parseCommand`。
-11. 描述的每个 section 带 `value.format`（线上常见 `MD` 与 `HTML`）。`parseDescriptionPage` 对 `MD` 调用 `markdown.ts#renderMarkdown` 转成 HTML，`HTML` 原样保留；转换发生在样例提取之前，因此 Markdown 中的 `vjudge_sample` 原始表格与代码块都能正常解析。Markdown 渲染器是零依赖子集实现，支持标题、粗斜体、删除线、行内代码、围栏代码块、有序/无序列表与嵌套、引用、分隔线、GFM 表格、链接/图片、原始 HTML 块；公式 `$...$`/`$$...$$` 原样输出给 Webview 渲染，行内代码与代码块内的内容只转义不解析。输出仍是未净化 HTML，最终必须经过 `sanitizeStatementHtml`。
+10. 数学公式由 Webview 内置的 TeX 子集渲染器处理（`\(...\)`、`\[...\]`、`$...$`、`$$...$$`），支持常用符号、上下标、分式、根号、`\sum`/`\int`、`\text`、`cases` 等环境；不引入 KaTeX/MathJax，不联网。正文跳过 `script/style/textarea/.samples/.mj`；`pre`/`code` 内只识别显式 `\(...\)`、`\[...\]`，不解析 `$`，避免误伤代码与 shell 变量。渲染后的节点加 `.mj` 防止重复处理。新增符号改 `statementPanel.ts` 的 `SYMBOLS` 或 `parseCommand`。Codeforces 题面用 `$$$...$$$`（行内）和 `$$$$$$...$$$$$$`（行间）作定界符，`sanitizeStatementHtml` 会先把它们归一化成 `\(...\)` / `\[...\]`（跳过 `pre`/`code` 段），Webview 不直接处理三重美元符号；否则 `$$` 会被误判成行间公式，把正文切碎并吞掉词间空格。
+11. 描述的每个 section 带 `value.format`（线上常见 `MD` 与 `HTML`）。`parseDescriptionPage` 对 `MD` 调用 `markdown.ts#renderMarkdown` 转成 HTML，`HTML` 原样保留；转换发生在样例提取之前，因此 Markdown 中的 `vjudge_sample` 原始表格与代码块都能正常解析。Markdown 渲染器是零依赖子集实现，支持标题、粗斜体、删除线、行内代码、围栏代码块、有序/无序列表与嵌套、引用、分隔线、GFM 表格、链接/图片、原始 HTML 块；公式 `$...$`/`$$...$$`（以及 Codeforces 的 `$$$...$$$`/`$$$$$$...$$$$$$`）原样输出给 Webview 渲染，行内代码与代码块内的内容只转义不解析。输出仍是未净化 HTML，最终必须经过 `sanitizeStatementHtml`。
+12. 题面附件使用 VJudge 前端同款标记 `[pdf:CDN_BASE_URL/hash?N]`。`sanitizeStatementHtml` 在清洗前把所有 `[pdf:...]` 转为文件卡片（`.vj-file`），`data-vj-url` 保存解析后的绝对地址、`data-vj-index` 记录顺序；`CDN_BASE_URL/`、`//host`、`/path` 分别补全为 CDN、HTTPS、`https://vjudge.net`，非 HTTP(S) 地址原样保留不生成卡片。Webview 点击按钮发送 `{type:'file', action, url, index}`：`preview` 走原有的链接白名单后用系统浏览器打开（浏览器内预览 PDF），`download` 调用 `fileTransfer.downloadStatementFile`，默认文件名为“题目标题-附件N.pdf”。下载只允许 HTTPS、不携带 Cookie、上限 50 MB、30 秒超时、最多 3 次重定向，`text/html` 响应视为失败；写入前弹出保存对话框，完成后可“在文件管理器中显示”。
 
 ### 7.3 提交与轮询（`commands.submitProblem` / `pollSolution`）
 
@@ -230,6 +232,7 @@ VS Code UI（TreeView / Webview / Notification / StatusBar）
 - Cookie 只发送给 `vjudge.net` 及其子域；不要放宽到所有主机。HTTP 层只允许 `https:`。
 - 服务端 HTML 必须经过 `sanitizeStatementHtml` 才能进入 Webview；Webview 必须保留 CSP nonce 方案，不得加 `unsafe-eval`。
 - 题面链接只允许 `http/https`（客户端脚本与服务端 `openLink` 双重校验）；`javascript:` 一律拒绝。
+- 题面附件下载与 `vjudge.net` 的 API 会话完全隔离：只接受 HTTPS，不带 Cookie/鉴权头，不写入固定目录（必须经保存对话框），`text/html` 响应按失败处理。
 - 本地测试会执行工作区代码，因此 `package.json` 明确 `untrustedWorkspaces.supported = false`；不要移除。
 - 不引入遥测；除 VJudge 外不发起网络请求。
 
@@ -278,9 +281,10 @@ VS Code UI（TreeView / Webview / Notification / StatusBar）
 - **调整样例解析**：只改 `parser.extractSamples` 的策略顺序（表格→input/output div→dl→标题+pre）；保留 `dedupeSamples` 与文本归一化；更新 fixture 检查。
 - **调整题面 UI**：`statementPanel.ts` 的 `TOOLBAR/STYLES/SCRIPT/shell`；所有动态文本必须 `escapeHtml`，保持 CSP 与链接白名单；新增按钮要同步 `StatementCommand` 与 `commands.ts` 回调。
 - **调整题面图片**：VJudge 镜像题面的图片地址是占位符 `CDN_BASE_URL/...`，必须由 `sanitizeStatementHtml` 替换为实际 CDN（当前 `https://cdn.vjudge.net.cn/`）；Webview 的 `img-src` 已允许 https/http/data，不要收紧到只允许 data。
+- **调整题面附件**：标记转换在 `parser.ts` 的 `resolveStatementFileUrl`/`statementFileHtml`（`sanitizeStatementHtml` 开头），按钮样式与点击处理在 `statementPanel.ts`（`.vj-file`、`data-vj-action`、`{type:'file'}`），下载逻辑在 `fileTransfer.ts`。新增文件类型时同时改卡片里的 `vj-file-kind` 文本与下载默认扩展名；注意 `[pdf:]` 替换必须发生在 HTML 清洗之前，且只对 HTTP(S) 生成卡片。回归检查在 `scripts/check-parsers.js` 的“题面文件附件”。
 - **调整 Markdown 题面**：`api/markdown.ts#renderMarkdown` 是纯函数子集渲染器，`parseDescriptionPage` 只对 `format` 为 `MD`/`markdown` 的 section 调用；新增语法时同步 `scripts/check-parsers.js` 的“Markdown 题面”检查。公式必须在行内处理前保护成占位符再原样还原，代码围栏与行内代码只转义；原始 HTML 块直接透传，最终仍由 `sanitizeStatementHtml` 净化。
 - **调整题面列表**：元数据在 `parser.ts#collectJsonDescriptionRefs`/`parseDescriptions` 收集与排序，`client.descriptionsFromRef` 再兜底排序；面板只消费 `DescriptionRef[]`，新增字段先改 `types.ts`，再改 `statementPanel.descriptionsHtml` 的展示。
-- **调整数学渲染**：`statementPanel.ts` 的 `SCRIPT`（`SYMBOLS`、`parseCommand`、`parseEnvironment`）；保持 `String.raw` 写法避免转义丢失，渲染后加 `.mj` 类；正文跳过样例区，`pre/code` 只处理显式 `\(...\)`/`\[...\]`，不处理 `$`。
+- **调整数学渲染**：`statementPanel.ts` 的 `SCRIPT`（`SYMBOLS`、`parseCommand`、`parseEnvironment`）；保持 `String.raw` 写法避免转义丢失，渲染后加 `.mj` 类；正文跳过样例区，`pre/code` 只处理显式 `\(...\)`/`\[...\]`，不处理 `$`。Codeforces 的三重/六重美元定界符在 `parser.ts#normalizeCodeforcesMath`（由 `sanitizeStatementHtml` 调用）里归一化，新增定界符时同时改这里和 `scripts/check-parsers.js` 的“Codeforces 公式定界符”检查。
 - **调整题单**：`views/workbooks.ts`（分类状态、分页、详情缓存）+ `api/parser.ts#parseWorkbookDetail`（正文顺序、brief 兜底、`content/nodeId`）；新增字段先改 `WorkbookSummary`/`WorkbookDetail`，再改 `client.listWorkbooks` 的行映射。创建/更新走 `client.createWorkbook/updateWorkbook`（共享 `saveWorkbook`），题目集合由 `content` 中的 `[problem:...]` 标记决定；`commands.ts` 的 `parseProblemTokens/appendProblemMarkers` 负责解析与追加，更新时必须回传 `nodeId`。
 - **调整提交/轮询**：`client.submit`、`commands.pollSolution`；注意验证码重试上限与取消路径。
 - **错误提示**：命令层统一用 `reportError(prefix, error)`，登录类错误会提示“重新登录”；新增错误 kind 时同步 `errors.ts`。
@@ -370,6 +374,8 @@ npm run package
 28. **题单题数有服务端延迟**：向题单添加题目后，详情页（展开题单）立即能看到新题目，但 `/workbook/data` 返回的 `problemCount` 可能仍是旧值，稍后刷新才更新。
 29. **语言模板按扩展名共享**：全局模板目录每个扩展名只有一个文件（`main.<扩展名>`，Java 为 `Main.java`），同一扩展名的不同提交语言共用内容；`vjudge.languageTemplates` 不支持直接写模板正文。相对路径固定相对**首个工作区根目录**，多根工作区不会按当前文件所属目录解析。`${title}` 等占位符只做简单字符串替换，不执行其他语法；模板内容原样写入，不再自动添加题目注释。全局模板只在缺失时创建，删除文件后下次激活或执行编辑命令会重新生成。
 30. **Markdown 渲染是子集实现**：覆盖 VJudge/洛谷常见语法，但复杂表格、脚注、HTML 内嵌 Markdown、引用内多段惰性续行等不保证与网页端完全一致；无法识别的语法按普通文本输出。公式不做语法校验，仍交给 Webview 的 TeX 子集渲染器。
+31. **题面附件只识别 `[pdf:]` 标记**：VJudge 前端只有这一种文件标记，普通正文里的 `<a href>` 仍按链接处理，不会生成下载卡片。“在线预览”调用系统浏览器（浏览器原生 PDF 查看器），扩展内不能内嵌 PDF。下载需要用户在保存对话框中确认路径，默认固定 `.pdf` 扩展名；上限 50 MB、30 秒超时、最多 3 次重定向，CDN 返回 HTML（如验证页/错误页）会判定失败。附件地址不携带登录 Cookie，私有资源可能无法下载。
+32. **附件链接不受 Cookie 保护**：下载复用 `https` 直连与 `CDN_BASE_URL` 规则，仅限 HTTP(S)，不读取工作区设置中的代理；网络受限环境下需自行保证 CDN 可达。
 
 ## 14. 术语
 

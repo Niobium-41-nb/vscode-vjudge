@@ -302,9 +302,11 @@ function renderInline(source: string): string {
   text = text.replace(/\\\[([\s\S]+?)\\\]/g, (match) => hold(escapeText(match)));
   text = text.replace(/\\\(([\s\S]+?)\\\)/g, (match) => hold(escapeText(match)));
 
+  text = text.replace(/\${6}([\s\S]+?)\${6}/g, (match) => hold(escapeText(match)));
+  text = text.replace(/\${3}([\s\S]+?)\${3}/g, (match) => hold(escapeText(match)));
   text = text.replace(/\$\$([\s\S]+?)\$\$/g, (match) => hold(escapeText(match)));
-  text = text.replace(/(^|[^\\$])\$([^$\n]+?)\$/g, (_match, prefix: string, body: string) =>
-    `${prefix}${hold(escapeText(`$${body}$`))}`,
+  text = text.replace(/(?<![\\$])\$([^$\n]+?)\$/g, (_match, body: string) =>
+    hold(escapeText(`$${body}$`)),
   );
 
   text = text.replace(/<(https?:\/\/[^>\s]+)>/g, (_match, url: string) =>
@@ -334,5 +336,13 @@ function renderInline(source: string): string {
     .replace(/\*(\S[\s\S]*?)\*/g, '<em>$1</em>')
     .replace(/(^|[^\w])_(\S[\s\S]*?)_(?!\w)/g, '$1<em>$2</em>');
 
-  return text.replace(/\u0000(\d+)\u0000/g, (_match, index: string) => tokens[Number(index)] ?? '');
+  return restoreTokens(text, tokens);
+}
+
+function restoreTokens(text: string, tokens: string[]): string {
+  let html = text;
+  for (let pass = 0; pass < 8 && html.includes('\u0000'); pass++) {
+    html = html.replace(/\u0000(\d+)\u0000/g, (_match, index: string) => tokens[Number(index)] ?? '');
+  }
+  return html;
 }

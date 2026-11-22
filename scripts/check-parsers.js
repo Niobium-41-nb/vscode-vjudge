@@ -114,6 +114,36 @@ check(
 );
 check('HTML 段落不被转义', markdownHtml.includes('<p><strong>原样 HTML</strong></p>'));
 
+console.log('Codeforces 公式定界符');
+const cfMarkdownContent = [
+  'Kevin has an integer sequence $$$a$$$ of length $$$n$$$.',
+  '',
+  'At the same time, Kevin has $$$m$$$ types of magic, where the $$$i$$$-th type can be an integer $$$b_i$$$.',
+  '',
+  '$$$$$$x + y$$$$$$',
+].join('\n');
+const cfPage = `<html><body><textarea class="data-json-container">${JSON.stringify({
+  sections: [{ value: { format: 'MD', content: cfMarkdownContent } }],
+})}</textarea></body></html>`;
+const cfMarkdown = parser.parseDescriptionPage(cfPage).sections.map((section) => section.html).join('\n');
+check('Markdown 公式占位符全部还原', !cfMarkdown.includes('\u0000'), JSON.stringify(cfMarkdown.slice(0, 90)));
+check('Markdown 正文空格保留', cfMarkdown.includes('At the same time, Kevin has $$$m$$$ types of magic'));
+const cfSanitized = parser.sanitizeStatementHtml(cfMarkdown);
+check(
+  '行内 $$$ 归一化为 \\(...\\)',
+  cfSanitized.includes('\\(a\\)') && cfSanitized.includes('\\(b_i\\)') && cfSanitized.includes('\\(i\\)-th'),
+);
+check(
+  '行间 $$$$$$ 归一化为 \\[...\\]',
+  cfSanitized.includes('\\[x + y\\]'),
+);
+check('归一化后正文完整', cfSanitized.includes('of length \\(n\\).') && !cfSanitized.includes('$$$'));
+check(
+  '代码块内美元符号保持原样',
+  parser.sanitizeStatementHtml('<pre><code>echo $$$x$$$</code></pre>').includes('$$$x$$$'),
+);
+check('HTML 题面同样归一化', parser.sanitizeStatementHtml('<p>Let $$$a$$$ be an array.</p>').includes('\\(a\\)'));
+
 const markdownSamplePage = `<html><body><textarea class="data-json-container">${JSON.stringify({
   sections: [
     {
@@ -126,6 +156,22 @@ const markdownSamplePage = `<html><body><textarea class="data-json-container">${
 })}</textarea></body></html>`;
 const markdownSamples = parser.parseDescriptionPage(markdownSamplePage).samples;
 check('Markdown 题面样例提取', markdownSamples.length === 1 && markdownSamples[0].input === '1 2');
+
+console.log('题面文件附件');
+const fileHtml = parser.sanitizeStatementHtml(
+  "[pdf:CDN_BASE_URL/43733cb1a2f0cd53ebb6e4cd612db702?43]\n[pdf:https://cdn.vjudge.net.cn/other.pdf]",
+);
+check(
+  'PDF 标记转换为文件卡片',
+  fileHtml.includes('class="vj-file"') &&
+    fileHtml.includes('data-vj-url="https://cdn.vjudge.net.cn/43733cb1a2f0cd53ebb6e4cd612db702?43"') &&
+    fileHtml.includes('data-vj-action="preview"') &&
+    fileHtml.includes('data-vj-action="download"'),
+);
+check('不再残留 PDF 标记', !fileHtml.includes('[pdf:'));
+check('多个附件按顺序编号', fileHtml.includes('data-vj-index="0"') && fileHtml.includes('data-vj-index="1"'));
+const invalidFileHtml = parser.sanitizeStatementHtml('[pdf:javascript:alert(1)]');
+check('拒绝非 HTTP 文件链接', !invalidFileHtml.includes('vj-file') && invalidFileHtml.includes('[pdf:javascript'));
 
 console.log('题面引用兜底');
 const iframePage = `<html><head><title>测试题</title></head><body>
@@ -324,6 +370,16 @@ if (!scriptMatch) {
     );
     const codeDollar = transformText('echo $HOME and $((1+2))', true);
     check('代码块不解析美元符号', !codeDollar.changed && codeDollar.html === 'echo $HOME and $((1+2))');
+    const simpleInline = transformText('城市有 $n$ 座，由 $n - 1$ 条道路连接', false);
+    check(
+      '行内单字母与算式公式渲染',
+      simpleInline.changed &&
+        simpleInline.html.includes('<span class="mj">n</span>') &&
+        simpleInline.html.includes('mj-op'),
+      simpleInline.html.slice(0, 120),
+    );
+    const dollarProse = transformText('花费 $5 and $10 元', false);
+    check('非公式美元符号保持原样', !dollarProse.changed, dollarProse.html);
   } catch (error) {
     check('执行题面脚本', false, error.message);
   }

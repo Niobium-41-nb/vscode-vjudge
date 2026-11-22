@@ -829,7 +829,6 @@ export class VJudgeClient {
   }
 
   async submit(options: SubmitOptions): Promise<number> {
-    const encodedSource = Buffer.from(encodeURIComponent(options.code), 'utf8').toString('base64');
     const path =
       options.contestId !== undefined
         ? `/contest/submit/${options.contestId}/${encodeURIComponent(options.contestNum ?? '')}`
@@ -844,7 +843,7 @@ export class VJudgeClient {
         method: 0,
         language: options.language,
         open: options.open ? 1 : 0,
-        source: encodedSource,
+        source: options.code,
         captcha: options.captcha ?? '',
         password: '',
       },

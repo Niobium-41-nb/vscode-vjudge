@@ -3,6 +3,7 @@ import * as vscode from 'vscode';
 import { escapeHtml, sanitizeStatementHtml } from '../api/parser';
 import { DescriptionRef, ProblemRef, Statement } from '../api/types';
 import { describeError, Session } from '../session';
+import { downloadStatementFile } from '../fileTransfer';
 import { fetchStatement } from '../statementCache';
 
 export type StatementCommand =
@@ -153,6 +154,20 @@ main { padding: 16px 20px 64px; max-width: 980px; }
 .statement pre code { background: transparent; padding: 0; }
 .statement a { color: var(--vscode-textLink-foreground); text-decoration: none; }
 .statement a:hover { color: var(--vscode-textLink-activeForeground); text-decoration: underline; }
+.statement .vj-file {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
+  margin: .8em 0; padding: 8px 10px;
+  border: 1px solid var(--vscode-widget-border, rgba(128,128,128,.35));
+  border-radius: 4px;
+  background: var(--vscode-editorWidget-background, rgba(128,128,128,.08));
+}
+.statement .vj-file-kind {
+  padding: 1px 6px; border-radius: 3px;
+  font-size: .75em; font-weight: 600; letter-spacing: .04em;
+  background: var(--vscode-badge-background); color: var(--vscode-badge-foreground);
+}
+.statement .vj-file-label { flex: 1 1 auto; min-width: 120px; font-weight: 600; }
+.statement .vj-file-action { padding: 3px 9px; font-size: .85em; }
 .statement hr { border: none; border-top: 1px solid var(--vscode-widget-border, rgba(128,128,128,.35)); margin: 1.5em 0; }
 .vj-section-sep { margin: 2em 0; }
 .samples { margin-top: 28px; }
@@ -418,7 +433,11 @@ const SCRIPT = String.raw`
   function looksLikeMath(body) {
     if (!body || body.length > 200 || /[\r\n]/.test(body)) { return false; }
     if (/\\[a-zA-Z]+/.test(body)) { return true; }
-    return /[\^_=<>]|[{}]/.test(body) && /[A-Za-z0-9]/.test(body);
+    if (/[\^_=<>]|[{}]/.test(body) && /[A-Za-z0-9]/.test(body)) { return true; }
+    var text = body.replace(/\s+/g, ' ').trim();
+    if (/^[A-Za-z0-9]{1,8}$/.test(text)) { return true; }
+    return /^[A-Za-z0-9+\-*/(),.\[\]|!' ]{1,40}$/.test(text) &&
+      /[A-Za-z0-9]/.test(text) && /[+\-*/()\[\],]/.test(text);
   }
 
   function transformText(text, mathOnly) {
@@ -524,6 +543,20 @@ const SCRIPT = String.raw`
       if (target) { copyText(target.textContent || ''); }
       return;
     }
+    const fileAction = event.target.closest('[data-vj-action]');
+    if (fileAction) {
+      event.preventDefault();
+      const card = fileAction.closest('.vj-file');
+      if (card) {
+        vscode.postMessage({
+          type: 'file',
+          action: fileAction.getAttribute('data-vj-action'),
+          url: card.getAttribute('data-vj-url') || '',
+          index: Number(card.getAttribute('data-vj-index') || 0),
+        });
+      }
+      return;
+    }
     const anchor = event.target.closest('a');
     if (anchor) {
       const href = anchor.getAttribute('href') || '';
@@ -601,7 +634,16 @@ export class StatementPanel implements vscode.Disposable {
         this.disposables,
       );
       panel.webview.onDidReceiveMessage(
-        (message: { type?: string; command?: string; href?: string; text?: string; id?: number }) => {
+        (message: {
+          type?: string;
+          command?: string;
+          href?: string;
+          text?: string;
+          id?: number;
+          url?: string;
+          action?: string;
+          index?: number;
+        }) => {
           void this.handleMessage(message);
         },
         undefined,
@@ -632,8 +674,15 @@ export class StatementPanel implements vscode.Disposable {
     href?: string;
     text?: string;
     id?: number;
+    url?: string;
+    action?: string;
+    index?: number;
   }): Promise<void> {
     if (!message || typeof message.type !== 'string') {
+      return;
+    }
+    if (message.type === 'file' && typeof message.url === 'string') {
+      await this.handleFileAction(message.url, message.action, message.index);
       return;
     }
     if (message.type === 'description' && typeof message.id === 'number') {
@@ -686,6 +735,24 @@ export class StatementPanel implements vscode.Disposable {
       randomBytes(16).toString('base64'),
     );
     await this.render(false);
+  }
+
+  private async handleFileAction(url: string, action?: string, index?: number): Promise<void> {
+    if (action === 'preview') {
+      await this.openLink(url);
+      return;
+    }
+    if (action !== 'download') {
+      return;
+    }
+    const ref = this.current;
+    const title = ref?.title?.trim() || (ref ? `${ref.oj}-${ref.probNum}` : '题面附件');
+    const number = Number.isFinite(index) ? Math.max(0, Number(index)) + 1 : 1;
+    try {
+      await downloadStatementFile(url, `${title}-附件${number}.pdf`);
+    } catch (error) {
+      void vscode.window.showErrorMessage(`下载文件失败：${describeError(error)}`);
+    }
   }
 
   private async openLink(href: string): Promise<void> {

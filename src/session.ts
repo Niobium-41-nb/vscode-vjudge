@@ -8,6 +8,8 @@ const SECRET_PASSWORD = 'vjudge.password';
 const STATE_USERNAME = 'vjudge.username';
 const SOLVE_RECORDS_TTL = 5 * 60 * 1000;
 const SOLVE_RECORDS_RETRY = 60 * 1000;
+const RELOGIN_COOKIE_ACTION = '重新粘贴 Cookie';
+const RELOGIN_PASSWORD_ACTION = '用户名密码登录';
 
 export class Session implements vscode.Disposable {
   readonly client: VJudgeClient;
@@ -20,6 +22,8 @@ export class Session implements vscode.Disposable {
   private solveFailureAt = 0;
   private solveLoading?: Promise<void>;
   private solveGeneration = 0;
+  private reloginPrompt?: Promise<boolean>;
+  private cookiePersistTimer?: NodeJS.Timeout;
   private readonly changeEmitter = new vscode.EventEmitter<boolean>();
   readonly onDidChangeLogin = this.changeEmitter.event;
   private readonly solveChangeEmitter = new vscode.EventEmitter<void>();
@@ -31,6 +35,7 @@ export class Session implements vscode.Disposable {
     private readonly output: vscode.OutputChannel,
   ) {
     this.client = new VJudgeClient();
+    this.client.onCookiesChanged = () => this.scheduleCookiePersist();
     this.refreshTimeout();
   }
 
@@ -88,8 +93,12 @@ export class Session implements vscode.Disposable {
       this.client.importCookies(cookie);
     }
 
+    let cookieRejected = false;
     try {
-      if (this.client.hasCookies() && (await this.client.checkLoginStatus())) {
+      if (this.client.hasCookies()) {
+        cookieRejected = !(await this.client.checkLoginStatus());
+      }
+      if (this.client.hasCookies() && !cookieRejected) {
         const name = await this.client.getUsername();
         if (name) {
           await this.setUsername(name);
@@ -115,6 +124,15 @@ export class Session implements vscode.Disposable {
       this.output.appendLine(`[VJudge] 检查登录状态失败：${describeError(error)}`);
       await this.setLoggedIn(false);
     }
+
+    if (cookieRejected && !this.loggedInFlag) {
+      this.client.clearCookies();
+      await this.context.secrets.delete(SECRET_COOKIE);
+      this.output.appendLine('[VJudge] 保存的 Cookie 已失效，已清除，等待用户重新登录。');
+      void this.handleLoginExpired(
+        '保存的 VJudge 登录已失效（Cookie 已过期或被注销）。请重新粘贴浏览器中的 Cookie。',
+      );
+    }
     await this.persistCookies();
   }
 
@@ -122,7 +140,75 @@ export class Session implements vscode.Disposable {
     const cookies = this.client.exportCookies();
     if (cookies) {
       await this.context.secrets.store(SECRET_COOKIE, cookies);
+    } else {
+      await this.context.secrets.delete(SECRET_COOKIE);
     }
+  }
+
+  private scheduleCookiePersist(): void {
+    if (this.cookiePersistTimer || this.disposed) {
+      return;
+    }
+    this.cookiePersistTimer = setTimeout(() => {
+      this.cookiePersistTimer = undefined;
+      void this.persistCookies();
+    }, 500);
+    if (typeof this.cookiePersistTimer.unref === 'function') {
+      this.cookiePersistTimer.unref();
+    }
+  }
+
+  async handleLoginExpired(message: string): Promise<boolean> {
+    if (this.reloginPrompt) {
+      return this.reloginPrompt;
+    }
+    const run = (async () => {
+      let rejected = false;
+      if (this.client.hasCookies()) {
+        try {
+          if (await this.client.checkLoginStatus()) {
+            await this.setLoggedIn(true);
+            void vscode.window.showInformationMessage(
+              'VJudge 登录状态仍然有效，请重试刚才的操作。',
+            );
+            return true;
+          }
+          rejected = true;
+        } catch (error) {
+          this.output.appendLine(`[VJudge] 验证登录状态失败：${describeError(error)}`);
+        }
+      }
+      if (rejected) {
+        this.client.clearCookies();
+        await this.context.secrets.delete(SECRET_COOKIE);
+        this.output.appendLine('[VJudge] 保存的 Cookie 已失效，已清除，等待用户重新登录。');
+      }
+      await this.setLoggedIn(false);
+      return this.promptRelogin(message);
+    })();
+    this.reloginPrompt = run;
+    try {
+      return await run;
+    } finally {
+      if (this.reloginPrompt === run) {
+        this.reloginPrompt = undefined;
+      }
+    }
+  }
+
+  private async promptRelogin(message: string): Promise<boolean> {
+    const choice = await vscode.window.showWarningMessage(
+      message,
+      RELOGIN_COOKIE_ACTION,
+      RELOGIN_PASSWORD_ACTION,
+    );
+    if (choice === RELOGIN_COOKIE_ACTION) {
+      return this.loginWithCookie();
+    }
+    if (choice === RELOGIN_PASSWORD_ACTION) {
+      return this.login();
+    }
+    return false;
   }
 
   async login(): Promise<boolean> {
@@ -199,11 +285,13 @@ export class Session implements vscode.Disposable {
       return false;
     }
 
+    const previous = this.client.exportCookies();
     this.client.clearCookies();
     this.client.importCookies(cookie);
     try {
       if (!(await this.client.checkLoginStatus())) {
         this.client.clearCookies();
+        this.client.importCookies(previous);
         void vscode.window.showErrorMessage(
           'Cookie 未通过登录校验：VJudge 判定当前 Cookie 未登录。请确认浏览器中已登录 vjudge.net，刷新页面后重新复制完整 Cookie；若仍失败，可改用用户名密码登录。',
         );
@@ -211,6 +299,7 @@ export class Session implements vscode.Disposable {
       }
     } catch (error) {
       this.client.clearCookies();
+      this.client.importCookies(previous);
       void vscode.window.showErrorMessage(`Cookie 登录失败：${describeError(error)}`);
       return false;
     }
@@ -251,21 +340,30 @@ export class Session implements vscode.Disposable {
       return;
     }
 
+    let cookieRejected = false;
     if (this.client.hasCookies()) {
       try {
         if (await this.client.checkLoginStatus()) {
           await this.setLoggedIn(true);
           return;
         }
+        cookieRejected = true;
       } catch (error) {
         this.output.appendLine(`[VJudge] 恢复登录失败：${describeError(error)}`);
       }
     }
+    if (cookieRejected) {
+      this.client.clearCookies();
+      await this.context.secrets.delete(SECRET_COOKIE);
+      this.output.appendLine('[VJudge] 保存的 Cookie 已失效，已清除，等待用户重新登录。');
+    }
 
     const choice = await vscode.window.showInformationMessage(
-      '此操作需要登录 VJudge。',
-      '用户名密码登录',
+      cookieRejected
+        ? '保存的 VJudge 登录已失效，请重新粘贴 Cookie 或使用账号密码登录。'
+        : '此操作需要登录 VJudge。',
       '使用 Cookie 登录',
+      '用户名密码登录',
     );
     if (choice === '用户名密码登录') {
       await this.login();
@@ -409,10 +507,18 @@ export class Session implements vscode.Disposable {
       return;
     }
     this.disposed = true;
+    if (this.cookiePersistTimer) {
+      clearTimeout(this.cookiePersistTimer);
+      this.cookiePersistTimer = undefined;
+    }
     void this.persistCookies();
     this.changeEmitter.dispose();
     this.solveChangeEmitter.dispose();
   }
+}
+
+export function isLoginError(error: unknown): boolean {
+  return error instanceof VJudgeError && error.kind === 'login';
 }
 
 export function describeError(error: unknown): string {

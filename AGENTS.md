@@ -7,7 +7,7 @@
 - 目标：在 VS Code 中完成 VJudge（https://vjudge.net/）的题目浏览/搜索、题面阅读、代码提交、评测轮询、提交记录、比赛题目、题单（workbook）和本地样例测试。
 - 技术栈：TypeScript + VS Code Extension API，CommonJS 输出到 `out/`，入口 `out/extension.js`。
 - 运行时零第三方依赖；只用 Node 内置模块（`https`、`child_process`、`fs`、`crypto` 等）。
-- 当前版本 `0.2.5`，产物 `vjudge-0.2.5.vsix`（不纳入版本控制）。
+- 当前版本 `0.2.7`，产物 `vjudge-0.2.7.vsix`（不纳入版本控制）。
 - 所有界面文案、错误提示、注释使用中文；不要引入 emoji。
 
 ## 2. 常用命令
@@ -29,7 +29,7 @@ npm run package        # npx @vscode/vsce package --no-dependencies，生成 VSI
 | --- | --- |
 | `src/extension.ts` | `ExtensionController`：创建 Session、四个 TreeView、题面面板、状态栏、命令；监听登录/配置变化；统一 dispose |
 | `src/commands.ts` | 全部命令编排：搜索、打开题面、新建文件、提交、验证码、轮询、查看提交、浏览器打开、复制链接、样例测试、题单搜索/创建/加入退出/添加题目 |
-| `src/session.ts` | 登录状态机、SecretStorage、自动恢复登录、用户名维护、做题状态缓存、`describeError` |
+| `src/session.ts` | 登录状态机、SecretStorage、自动恢复登录、Cookie 过期引导、用户名维护、做题状态缓存、`describeError` |
 | `src/api/client.ts` | VJudge HTTP 客户端：Cookie 容器、重定向、各接口、响应归一化、登录态判定 |
 | `src/api/http.ts` | 裸 `https.request`，只允许 HTTPS；收集 body/headers/set-cookie；超时 |
 | `src/api/parser.ts` | 比赛页/题目页/题面页解析、样例提取、HTML 清洗、实体解码 |
@@ -133,12 +133,14 @@ VS Code UI（TreeView / Webview / Notification / StatusBar）
 ### 7.1 登录与会话恢复（`src/session.ts`）
 
 1. `initialize()`：读取 globalState/配置中的用户名（`404`、`user` 等无效值会被丢弃）→ 导入 SecretStorage Cookie → `checkLogInStatus`；Cookie 有效时再请求登录后主页校正用户名（避免沿用错误的缓存名）。
-2. Cookie 无效时，若存在已保存的用户名+密码则自动登录；失败只记录日志。
+2. `checkLogInStatus` 明确判定 Cookie 失效时，若存在已保存的用户名+密码则自动登录；仍失败（或没有保存密码）时清除失效 Cookie 与 SecretStorage 记录，并弹出通知引导“重新粘贴 Cookie / 用户名密码登录”，Cookie 优先。
 3. 登录成功后：用户名写入 globalState 与 `vjudge.username` 配置，密码写入 SecretStorage，Cookie 持久化，触发 `vjudge.loggedIn` 上下文与 `onDidChangeLogin`。
-4. Cookie 登录：清空现有 Cookie → 导入用户粘贴串（支持 `JSESSIONID=...; ...` 或裸 JSESSIONID）→ 验证 → **优先使用服务端自动识别到的用户名**，识别失败才用输入值。
-5. 注销：请求服务端注销、清 Cookie、删密码/用户名、更新上下文。
-6. `ensureLoggedIn()` 在命令入口兜底：Cookie 可用则静默恢复，否则弹“用户名密码登录 / 使用 Cookie 登录”；取消则抛错。
-7. `getUsername()` 先请求登录后主页，从 `/user/{name}` 链接取用户名；再退回 `/user/` 的 finalUrl/标题。`404`、`Not Found`、`login` 等候选一律拒绝，`setUsername()` 也会做同样清洗，避免把错误页当成用户名。
+4. Cookie 登录：保存旧 Cookie → 清空现有 Cookie → 导入用户粘贴串（支持 `JSESSIONID=...; ...` 或裸 JSESSIONID）→ 验证 → **优先使用服务端自动识别到的用户名**，识别失败才用输入值；验证失败时恢复旧 Cookie，避免一次错误粘贴顶掉仍可用的会话。
+5. Cookie 持久化：`VJudgeClient.storeCookies` 在服务端下发/更新/清空 Cookie 后触发 `onCookiesChanged`，`Session` 防抖 500ms 写入 SecretStorage；导出为空时删除 SecretStorage 记录（`persistCookies` 统一处理）。
+6. 登录失效统一入口 `Session.handleLoginExpired(message)`：先用 `checkLogInStatus` 复核，仍有效则保持登录并提示重试；确认失效则清 Cookie、退出登录并弹“重新粘贴 Cookie / 用户名密码登录”。`reportError` 的登录类错误走该入口；`ensureLoggedIn()` 遇到失效 Cookie 也先清除再以 Cookie 选项优先提示；四个视图 Provider 与题面面板在加载失败且错误为登录类时同样调用该入口；整个流程单飞，避免并发弹窗。
+7. 注销：请求服务端注销、清 Cookie、删密码/用户名、更新上下文。
+8. `ensureLoggedIn()` 在命令入口兜底：Cookie 可用则静默恢复，否则弹“使用 Cookie 登录 / 用户名密码登录”（Cookie 失效时 Cookie 选项在前）；取消则抛错。
+9. `getUsername()` 先请求登录后主页，从 `/user/{name}` 链接取用户名；再退回 `/user/` 的 finalUrl/标题。`404`、`Not Found`、`login` 等候选一律拒绝，`setUsername()` 也会做同样清洗，避免把错误页当成用户名。
 
 ### 7.2 题面获取与缓存（`statementCache.ts` + `client.getStatement`）
 
@@ -322,6 +324,12 @@ node "C:/Users/14530/AppData/Local/Temp/vjudge-smoke.js" "D:/Program Files/vscod
 
 它 mock 了 `vscode` API，覆盖：激活、全部命令注册、四个视图、未登录空态、树节点、题单分类/题单/题目节点、题单创建/追加题目（输入解析、去重、标记追加、回传 `nodeId`）、题面 HTML/安全（CSP、脚本清理、重复样例表移除、javascript 链接拒绝）、真实 Python 样例运行（通过/失败/差异展示）。若文件不存在，需要按这些断言重建；建议未来移入 `scripts/`（注意 `.vscodeignore` 已排除 `scripts/**`）。
 
+登录状态机的临时 harness：`C:\Users\14530\AppData\Local\Temp\vjudge-cookie-test.js`，mock `vscode` 与 `VJudgeClient`，覆盖：启动时失效 Cookie 清除并索要新 Cookie、有效 Cookie 自动恢复、前台登录失效后重新粘贴、Cookie 变化自动持久化、空 Cookie 删除存储、客户端 Cookie 变化检测。
+
+```bash
+node "C:/Users/14530/AppData/Local/Temp/vjudge-cookie-test.js" "D:/Program Files/vscode-vjudge"
+```
+
 ### 手动验收（必须）
 
 用 F5 启动扩展开发宿主，准备真实账号：
@@ -360,7 +368,7 @@ npm run package
 12. **自动刷新只刷新一次列表**，不做单条状态轮询；评测中的条目依赖下一次刷新。
 13. **做题状态依赖 OJ 显示名匹配**：`/user/solveDetail` 按 OJ 显示名分组，客户端只做大小写、空格、下划线、连字符归一化；若 VJudge 改版导致搜索/比赛里的 OJ 名与通过记录键不一致，题目会显示“未做”而不是“未知”。比赛与题单共用全局通过记录，不区分具体比赛。
 14. **页面大小下限不一致**：`package.json` 中 `problemPageSize` 最小 5，代码实际按 10 取；修改时统一。
-15. **`reportError` 的“重新登录”固定走用户名密码登录**，没有提供 Cookie 选项；若密码登录被拦截，用户需手动执行 Cookie 登录命令。
+15. **登录失效提示以 Cookie 为主**：`reportError`、视图加载与题面面板遇到登录类错误都会调用 `Session.handleLoginExpired`，先复核 Cookie 是否真的失效，确认后弹出“重新粘贴 Cookie / 用户名密码登录”；复核仍有效时只提示重试。提交记录自动刷新等后台请求也可能触发一次弹窗；失效后会退出登录态，视图停止请求，用户关闭提示后需下一次操作（`ensureLoggedIn`）再次引导。
 16. **未使用代码**：`forgetProblemFile`、`invalidateStatement`、`originProblemUrl`、`ProblemsProvider.currentCriteria` 目前无调用方，可安全删除或接入。
 17. **UI 未在真实 VS Code 中做过像素级验收**，布局调整后需手动检查窄面板与主题切换。
 18. **CPH 导入只支持 `.prob`**：URL 为 VJudge `/problem/{oj}-{probNum}` 时才建立题目映射；比赛链接、非 VJudge 链接只导入测试。CPH 的 `customCheckerPath` 和交互题 checker 未接入，仍按 stdout 完全一致比较。

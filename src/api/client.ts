@@ -140,6 +140,7 @@ function descriptionsFromRef(ref: ProblemRef): DescriptionRef[] {
 export class VJudgeClient {
   private readonly cookies = new Map<string, string>();
   public timeoutMs = 20000;
+  onCookiesChanged?: () => void;
 
   constructor(timeoutMs?: number) {
     if (timeoutMs) {
@@ -192,6 +193,10 @@ export class VJudgeClient {
   }
 
   private storeCookies(setCookies: string[]): void {
+    if (setCookies.length === 0) {
+      return;
+    }
+    const before = this.exportCookies();
     for (const cookie of setCookies) {
       const pair = cookie.split(';')[0];
       const index = pair.indexOf('=');
@@ -209,6 +214,9 @@ export class VJudgeClient {
       } else {
         this.cookies.set(name, value);
       }
+    }
+    if (this.exportCookies() !== before) {
+      this.onCookiesChanged?.();
     }
   }
 

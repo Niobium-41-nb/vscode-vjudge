@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { SearchProblemOptions } from '../api/types';
-import { describeError, Session } from '../session';
+import { describeError, isLoginError, Session } from '../session';
 import { getConfiguration } from '../utils';
 import {
   createInfoItem,
@@ -102,6 +102,9 @@ export class ProblemsProvider implements vscode.TreeDataProvider<ProblemsNode>, 
       } catch (error) {
         this.error = describeError(error);
         this.loaded = true;
+        if (isLoginError(error)) {
+          void this.session.handleLoginExpired(this.error);
+        }
       } finally {
         this.loading = undefined;
         await this.session.persistCookies();

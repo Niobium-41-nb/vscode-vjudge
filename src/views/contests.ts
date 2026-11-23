@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { ContestDetail, ProblemRef } from '../api/types';
-import { describeError, Session } from '../session';
+import { describeError, isLoginError, Session } from '../session';
 import {
   ContestTreeItem,
   createContestItem,
@@ -70,6 +70,9 @@ export class ContestsProvider implements vscode.TreeDataProvider<ContestsNode>, 
       } catch (error) {
         this.error = describeError(error);
         this.contests = [];
+        if (isLoginError(error)) {
+          void this.session.handleLoginExpired(this.error);
+        }
       } finally {
         this.loaded = true;
         this.loading = undefined;
@@ -106,6 +109,9 @@ export class ContestsProvider implements vscode.TreeDataProvider<ContestsNode>, 
       this.detailErrors.delete(contestId);
     } catch (error) {
       this.detailErrors.set(contestId, describeError(error));
+      if (isLoginError(error)) {
+        void this.session.handleLoginExpired(describeError(error));
+      }
     } finally {
       this.detailLoading.delete(contestId);
       await this.session.persistCookies();

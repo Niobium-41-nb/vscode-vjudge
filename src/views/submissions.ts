@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { describeError, Session } from '../session';
+import { describeError, isLoginError, Session } from '../session';
 import { getConfiguration } from '../utils';
 import { createInfoItem, createSubmissionItem, InfoTreeItem, SubmissionTreeItem } from './items';
 
@@ -60,6 +60,9 @@ export class SubmissionsProvider implements vscode.TreeDataProvider<SubmissionsN
       } catch (error) {
         this.error = describeError(error);
         this.loaded = true;
+        if (isLoginError(error)) {
+          void this.session.handleLoginExpired(this.error);
+        }
       } finally {
         this.loading = undefined;
         await this.session.persistCookies();

@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { ProblemRef, WorkbookCategory } from '../api/types';
-import { describeError, Session } from '../session';
+import { describeError, isLoginError, Session } from '../session';
 import {
   createInfoItem,
   createProblemItem,
@@ -148,6 +148,9 @@ export class WorkbooksProvider implements vscode.TreeDataProvider<WorkbooksNode>
         }
         state.error = describeError(error);
         state.loaded = true;
+        if (isLoginError(error)) {
+          void this.session.handleLoginExpired(state.error);
+        }
       } finally {
         if (this.states.get(category) === state) {
           state.loading = undefined;
@@ -172,6 +175,9 @@ export class WorkbooksProvider implements vscode.TreeDataProvider<WorkbooksNode>
       this.detailErrors.delete(workbookId);
     } catch (error) {
       this.detailErrors.set(workbookId, describeError(error));
+      if (isLoginError(error)) {
+        void this.session.handleLoginExpired(describeError(error));
+      }
     } finally {
       this.detailLoading.delete(workbookId);
       await this.session.persistCookies();

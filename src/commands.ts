@@ -234,10 +234,7 @@ export function registerCommands(deps: CommandDeps): vscode.Disposable[] {
       );
     }
     if (error instanceof VJudgeError && error.kind === 'login') {
-      const choice = await vscode.window.showErrorMessage(message, '重新登录');
-      if (choice === '重新登录') {
-        await session.login();
-      }
+      await session.handleLoginExpired(message);
       return;
     }
     void vscode.window.showErrorMessage(message);

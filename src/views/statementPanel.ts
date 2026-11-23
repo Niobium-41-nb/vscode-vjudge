@@ -2,7 +2,7 @@ import { randomBytes } from 'crypto';
 import * as vscode from 'vscode';
 import { escapeHtml, sanitizeStatementHtml } from '../api/parser';
 import { DescriptionRef, ProblemRef, Statement } from '../api/types';
-import { describeError, Session } from '../session';
+import { describeError, isLoginError, Session } from '../session';
 import { downloadStatementFile } from '../fileTransfer';
 import { fetchStatement } from '../statementCache';
 
@@ -798,6 +798,9 @@ export class StatementPanel implements vscode.Disposable {
     } catch (error) {
       if (requestId !== this.requestId || !this.panel || this.current !== ref) {
         return;
+      }
+      if (isLoginError(error)) {
+        void this.session.handleLoginExpired(describeError(error));
       }
       const message = escapeHtml(describeError(error));
       const body = `${this.descriptionsHtml(this.descriptionId)}<div class="error-box">获取题面失败：${message}</div>

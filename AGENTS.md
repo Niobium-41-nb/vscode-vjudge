@@ -7,7 +7,7 @@
 - 目标：在 VS Code 中完成 VJudge（https://vjudge.net/）的题目浏览/搜索、题面阅读、代码提交、评测轮询、提交记录、比赛题目、题单（workbook）和本地样例测试。
 - 技术栈：TypeScript + VS Code Extension API，CommonJS 输出到 `out/`，入口 `out/extension.js`。
 - 运行时零第三方依赖；只用 Node 内置模块（`https`、`child_process`、`fs`、`crypto` 等）。
-- 当前版本 `0.2.7`，产物 `vjudge-0.2.7.vsix`（不纳入版本控制）。
+- 当前版本 `0.2.8`，产物 `vjudge-0.2.8.vsix`（不纳入版本控制）。
 - 所有界面文案、错误提示、注释使用中文；不要引入 emoji。
 
 ## 2. 常用命令
@@ -226,8 +226,9 @@ VS Code UI（TreeView / Webview / Notification / StatusBar）
 3. 模板内容查找顺序：`vjudge.languageTemplates` 显式配置 → 全局模板目录中的同名文件 → 内置模板。配置候选键依次为语言显示名、扩展名、带点扩展名；值按绝对路径或相对首个工作区根目录解析。命中文件时**完整替换**内置内容，不再自动加题目注释；读取 UTF-8（去 BOM）并替换 `${title}/${oj}/${probNum}`。
 4. 全局模板目录为 `<globalStorage>/templates`（`context.globalStorageUri`）。激活时创建目录，并为 `templates.ts` 中所有唯一扩展名写入缺失的模板文件；已存在的文件绝不覆盖，用户修改会一直保留。Java 文件名为 `Main.java`，其余为 `main.<扩展名>`。每个文件预置 `${title}` 占位符，空模板也至少有标题注释。
 5. “VJudge: 编辑语言模板”命令会先补齐缺失文件，再列出所有模板（含“打开模板目录”），选中后直接用 VS Code 编辑；保存即生效，无需重新加载窗口。
-6. 无法识别的语言会询问扩展名，再用该扩展名重复一次模板查找。
-7. 文件目录由 `vjudge.solutionsDirectory` 决定；写入后记录题目↔文件映射，先自动导入 CPH 测试数据，再打开文件，保证 CPH 能立即读到 `.prob`。
+6. 头文件查找顺序：`vjudge.languageHeaders`（直接文本）→ `vjudge.languageHeaderFiles`（文件路径）→ 全局头文件目录 `<globalStorage>/headers/<扩展名>.txt`（激活时按内置默认创建，不覆盖已有文件）。`applyLanguageHeader` 按行合并：模板已包含头文件的每一行（忽略行首尾与连续空白）时不再插入；模板开头已有部分头文件行时替换该头部区域；否则插到标题注释之后或文件最前。内置模板与默认头文件内容相同，应用后保持原样。
+7. 无法识别的语言会询问扩展名，再用该扩展名重复一次模板查找。
+8. 文件目录由 `vjudge.solutionsDirectory` 决定；写入后记录题目↔文件映射，先自动导入 CPH 测试数据，再打开文件，保证 CPH 能立即读到 `.prob`。
 
 ## 8. 安全与隐私（修改时不可破坏）
 

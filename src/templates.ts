@@ -224,6 +224,10 @@ const DEFAULT_HEADERS: Record<string, string> = {
   swift: 'import Foundation\n\n',
 };
 
+function headerLineKey(line: string): string {
+  return line.trim().replace(/\s+/g, ' ');
+}
+
 export function applyLanguageHeader(
   template: LanguageTemplate & { recognized: boolean },
   headers: string,
@@ -232,21 +236,48 @@ export function applyLanguageHeader(
   if (!value) {
     return template;
   }
+  const content = template.content.replace(/\r\n?/g, '\n');
   const defaultHeader = DEFAULT_HEADERS[template.extension.toLowerCase()];
-  if (defaultHeader && template.content.includes(defaultHeader)) {
+  if (defaultHeader && content.includes(defaultHeader)) {
     return {
       ...template,
-      content: template.content.replace(defaultHeader, `${value}\n\n`),
+      content: content.replace(defaultHeader, `${value}\n\n`),
     };
   }
-  const lines = template.content.split('\n');
+
+  const headerKeys = new Set(value.split('\n').map(headerLineKey).filter(Boolean));
+  if (headerKeys.size === 0) {
+    return template;
+  }
+  const lines = content.split('\n');
+  const contentKeys = new Set(lines.map(headerLineKey));
+  if ([...headerKeys].every((key) => contentKeys.has(key))) {
+    return template;
+  }
+
+  let anchor = 0;
   if (lines.length > 0 && /^(?:\/\/|#|--)\s/.test(lines[0])) {
+    anchor = 1;
+  }
+  let end = anchor;
+  while (end < lines.length && headerKeys.has(headerLineKey(lines[end]))) {
+    end += 1;
+  }
+  if (end > anchor) {
+    const rest = lines.slice(end).join('\n').replace(/^\n+/, '');
+    const head = lines.slice(0, anchor).join('\n');
+    return {
+      ...template,
+      content: head ? `${head}\n${value}\n\n${rest}` : `${value}\n\n${rest}`,
+    };
+  }
+  if (anchor > 0) {
     return {
       ...template,
       content: `${lines[0]}\n${value}\n\n${lines.slice(1).join('\n')}`,
     };
   }
-  return { ...template, content: `${value}\n\n${template.content}` };
+  return { ...template, content: `${value}\n\n${content}` };
 }
 
 export interface BuiltinHeaderFile {

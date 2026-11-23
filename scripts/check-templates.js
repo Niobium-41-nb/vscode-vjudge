@@ -76,6 +76,46 @@ const rendered = templates.applyTemplateVariables(
 );
 check('全局模板可替换题目信息', rendered.startsWith('// A. Watermelon') && rendered.includes('int main()'));
 
+console.log('语言头文件合并');
+const cppHeader = templates.builtinHeaderFiles().find((file) => file.extension === 'cpp').content;
+const customCpp = {
+  extension: 'cpp',
+  recognized: true,
+  content: '// A. Watermelon\n#include <bits/stdc++.h>\nusing namespace std;\nint main() {\n    return 0;\n}\n',
+};
+const customMerged = templates.applyLanguageHeader(customCpp, cppHeader);
+check('模板已含头文件时不重复插入', customMerged.content === customCpp.content);
+check(
+  '重复的 include 只出现一次',
+  customMerged.content.split('#include <bits/stdc++.h>').length - 1 === 1,
+);
+const partialCpp = {
+  extension: 'cpp',
+  recognized: true,
+  content: '// A. Watermelon\n#include <bits/stdc++.h>\nint main() {\n    return 0;\n}\n',
+};
+const partialMerged = templates.applyLanguageHeader(partialCpp, cppHeader).content;
+check(
+  '缺少的头文件行补到已有头部',
+  partialMerged.split('#include <bits/stdc++.h>').length - 1 === 1 &&
+    partialMerged.includes('using namespace std;') &&
+    partialMerged.indexOf('using namespace std;') < partialMerged.indexOf('int main'),
+  JSON.stringify(partialMerged),
+);
+const builtinCpp = templates.buildCodeTemplate('GNU G++17', 'A. Watermelon');
+check(
+  '内置模板应用默认头文件后保持不变',
+  templates.applyLanguageHeader(builtinCpp, cppHeader).content === builtinCpp.content,
+);
+const extendedHeader = '#include <bits/stdc++.h>\n#include <ext/pb_ds/assoc_container.hpp>\nusing namespace std;';
+const extendedMerged = templates.applyLanguageHeader(builtinCpp, extendedHeader).content;
+check(
+  '自定义头文件替换默认头块',
+  extendedMerged.includes('#include <ext/pb_ds/assoc_container.hpp>') &&
+    extendedMerged.split('#include <bits/stdc++.h>').length - 1 === 1,
+  JSON.stringify(extendedMerged),
+);
+
 if (failures > 0) {
   console.log(`\n${failures} 项检查失败`);
   process.exitCode = 1;

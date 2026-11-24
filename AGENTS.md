@@ -7,7 +7,7 @@
 - 目标：在 VS Code 中完成 VJudge（https://vjudge.net/）的题目浏览/搜索、题面阅读、代码提交、评测轮询、提交记录、比赛题目、题单（workbook）和本地样例测试。
 - 技术栈：TypeScript + VS Code Extension API，CommonJS 输出到 `out/`，入口 `out/extension.js`。
 - 运行时零第三方依赖；只用 Node 内置模块（`https`、`child_process`、`fs`、`crypto` 等）。
-- 当前版本 `0.2.10`，产物 `vjudge-0.2.10.vsix`（不纳入版本控制）。
+- 当前版本 `0.2.11`，产物 `vjudge-0.2.11.vsix`（不纳入版本控制）。
 - 所有界面文案、错误提示、注释使用中文；不要引入 emoji。
 
 ## 2. 常用命令

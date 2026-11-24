@@ -2,7 +2,7 @@
   "name": "vjudge",
   "displayName": "VJudge",
   "description": "在 VS Code 中浏览 VJudge 题目、阅读题面、提交代码并查看评测结果。",
-  "version": "0.2.10",
+  "version": "0.2.11",
   "publisher": "niobium-41-nb",
   "license": "MIT",
   "repository": {

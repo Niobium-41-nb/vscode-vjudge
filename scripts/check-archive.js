@@ -1,8 +1,21 @@
 const path = require('path');
+const Module = require('module');
 
 const root = path.join(__dirname, '..');
 const client = require(path.join(root, 'out', 'api', 'client.js'));
 const errors = require(path.join(root, 'out', 'api', 'errors.js'));
+const parser = require(path.join(root, 'out', 'api', 'parser.js'));
+const statementCache = require(path.join(root, 'out', 'statementCache.js'));
+const originalLoad = Module._load;
+Module._load = function (request, parent, isMain) {
+  return request === 'vscode' ? {} : originalLoad.call(this, request, parent, isMain);
+};
+let commands;
+try {
+  commands = require(path.join(root, 'out', 'commands.js'));
+} finally {
+  Module._load = originalLoad;
+}
 
 let failures = 0;
 function check(name, condition, detail) {
@@ -64,6 +77,59 @@ async function main() {
   form = result.captured.options.form;
   check('比赛使用比赛提交接口', result.captured.urlPath === '/contest/submit/803029/A', result.captured.urlPath);
   check('比赛归档同样携带绑定', form.method === 2 && form.bindingId === 7);
+
+  console.log('归档语言元数据');
+  const detailHtml = `<html><body><textarea name="dataJson">${JSON.stringify({
+    problemId: 1,
+    title: '测试题目',
+    languages: { cpp17: 'GNU G++17' },
+    submitMethods: [true, false, true],
+    descBriefs: [{ key: 123, version: 0 }],
+  })}</textarea></body></html>`;
+  const detail = parser.parseProblemDetail(detailHtml, 'CodeForces', '4A');
+  const ref = {
+    oj: 'CodeForces',
+    probNum: '4A',
+    title: '测试题目',
+    descBriefs: [{ key: 123, version: 0 }],
+  };
+  let detailRequests = 0;
+  const statementErrors = [];
+  const languages = await commands.loadProblemLanguages(
+    {
+      client: {
+        getStatement: async () => ({ languages: {} }),
+        getProblemDetail: async () => {
+          detailRequests++;
+          return detail;
+        },
+      },
+    },
+    ref,
+    (error) => statementErrors.push(error),
+  );
+  check('题面无语言时补全题目详情', detailRequests === 1, String(detailRequests));
+  check('空语言题面无需额外报错', statementErrors.length === 0, String(statementErrors.length));
+  check('归档获得提交语言', languages.cpp17 === 'GNU G++17', JSON.stringify(languages));
+  check('语言写回题目引用', ref.languages === languages);
+  check('同步归档支持状态', JSON.stringify(ref.submitMethods) === '[true,false,true]');
+
+  const fallbackRef = { oj: 'CodeForces', probNum: '5A' };
+  const fallbackLanguages = await commands.loadProblemLanguages(
+    {
+      client: {
+        getStatement: async () => {
+          throw new Error('题面请求失败');
+        },
+        getProblemDetail: async () => detail,
+      },
+    },
+    fallbackRef,
+    () => {},
+  );
+  check('题面请求失败仍可补全语言', fallbackLanguages.cpp17 === 'GNU G++17');
+  check('失败回退同样同步提交方式', JSON.stringify(fallbackRef.submitMethods) === '[true,false,true]');
+  statementCache.clearStatementCache();
 
   console.log('归档错误提示');
   const expected = {

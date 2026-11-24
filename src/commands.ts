@@ -157,6 +157,36 @@ function unwrapNode(value: unknown): unknown {
   return value;
 }
 
+export async function loadProblemLanguages(
+  session: Session,
+  ref: ProblemRef,
+  onError: (error: unknown) => void,
+): Promise<Record<string, string>> {
+  if (ref.languages && Object.keys(ref.languages).length > 0) {
+    return ref.languages;
+  }
+  try {
+    const statementInfo = await fetchStatement(session, ref);
+    if (Object.keys(statementInfo.languages).length > 0) {
+      ref.languages = statementInfo.languages;
+      return statementInfo.languages;
+    }
+  } catch (error) {
+    onError(error);
+  }
+  try {
+    const detail = await session.client.getProblemDetail(ref.oj, ref.probNum);
+    ref.languages = detail.languages;
+    if (!ref.submitMethods && detail.submitMethods) {
+      ref.submitMethods = detail.submitMethods;
+    }
+    return detail.languages;
+  } catch (error) {
+    onError(error);
+    return {};
+  }
+}
+
 function languageIdFor(language: string): string {
   switch (templateForLanguage(language).extension) {
     case 'cpp':
@@ -437,28 +467,12 @@ export function registerCommands(deps: CommandDeps): vscode.Disposable[] {
     return picked?.id;
   };
 
-  const languageForProblem = async (ref: ProblemRef): Promise<Record<string, string>> => {
-    if (ref.languages && Object.keys(ref.languages).length > 0) {
-      return ref.languages;
-    }
-    try {
-      const statementInfo = await fetchStatement(session, ref);
-      if (Object.keys(statementInfo.languages).length > 0) {
-        return statementInfo.languages;
-      }
-      const detail = await session.client.getProblemDetail(ref.oj, ref.probNum);
-      if (!ref.languages || Object.keys(ref.languages).length === 0) {
-        ref.languages = detail.languages;
-      }
-      if (!ref.submitMethods && detail.submitMethods) {
-        ref.submitMethods = detail.submitMethods;
-      }
-      return detail.languages;
-    } catch (error) {
-      output.appendLine(`[VJudge] 获取语言列表失败：${describeError(error)}`);
-      return {};
-    }
-  };
+  const languageForProblem = (ref: ProblemRef): Promise<Record<string, string>> =>
+    loadProblemLanguages(
+      session,
+      ref,
+      (error) => output.appendLine(`[VJudge] 获取语言列表失败：${describeError(error)}`),
+    );
 
   const resolveEditor = async (ref: ProblemRef): Promise<vscode.TextEditor | undefined> => {
     const uri = problemFile(ref);

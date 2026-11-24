@@ -7,7 +7,7 @@
 - 目标：在 VS Code 中完成 VJudge（https://vjudge.net/）的题目浏览/搜索、题面阅读、代码提交、评测轮询、提交记录、比赛题目、题单（workbook）和本地样例测试。
 - 技术栈：TypeScript + VS Code Extension API，CommonJS 输出到 `out/`，入口 `out/extension.js`。
 - 运行时零第三方依赖；只用 Node 内置模块（`https`、`child_process`、`fs`、`crypto` 等）。
-- 当前版本 `0.2.8`，产物 `vjudge-0.2.8.vsix`（不纳入版本控制）。
+- 当前版本 `0.2.9`，产物 `vjudge-0.2.9.vsix`（不纳入版本控制）。
 - 所有界面文案、错误提示、注释使用中文；不要引入 emoji。
 
 ## 2. 常用命令
@@ -17,6 +17,7 @@ npm install            # 只安装 devDependencies（typescript、@types/*）
 npm run compile        # tsc -p ./，输出到 out/
 npm run watch          # 增量编译
 npm run check:parsers  # 用真实页面 fixture 验证解析器（见第 12 节）
+npm run check:names    # 验证从文件名识别题目
 npm run package        # npx @vscode/vsce package --no-dependencies，生成 VSIX
 ```
 
@@ -38,6 +39,7 @@ npm run package        # npx @vscode/vsce package --no-dependencies，生成 VSI
 | `src/api/types.ts` | 全部数据模型；核心是 `ProblemRef` |
 | `src/statementCache.ts` | 题面 5 分钟缓存 + 并发去重；`statementKey`/`problemUrl` |
 | `src/problemFiles.ts` | 题目与本地文件的映射（**仅内存**） |
+| `src/problemName.ts` | 从文件名（`OJ-题号.ext`、Java 的 `OJ-题号/Main.java`）识别 `ProblemRef`，纯函数、无 vscode 依赖 |
 | `src/cphFormat.ts` | CPH `.prob` JSON 解析与生成、保存路径/文件名、VJudge 链接 → `ProblemRef` |
 | `src/cph.ts` | 扫描 `.cph`/自定义保存目录、用题面样例生成 `.prob`、持久化 CPH 题目路径、按源文件匹配 |
 | `src/templates.ts` | OJ 语言名 → 文件扩展名/代码模板；自定义模板键匹配与占位符替换；内置全局模板文件清单；文件名安全化 |
@@ -52,6 +54,7 @@ npm run package        # npx @vscode/vsce package --no-dependencies，生成 VSI
 | `src/views/statementPanel.ts` | 单例题面 Webview：工具栏、样例、复制、链接拦截、CSP |
 | `src/utils.ts` | 时间/内存/运行时间格式化、状态图标、配置读取 |
 | `scripts/check-parsers.js` | 解析器回归检查（读取 out/ 与 fixture） |
+| `scripts/check-problem-name.js` | 文件名识别题目的回归检查 |
 | `resources/` | 图标（活动栏、绿/红/灰状态） |
 
 ## 4. 运行时结构
@@ -159,7 +162,7 @@ VS Code UI（TreeView / Webview / Notification / StatusBar）
 
 ### 7.3 提交与轮询（`commands.submitProblem` / `pollSolution`）
 
-1. `resolveProblem`：直接参数 → 已映射文件 → 最近题目 QuickPick。
+1. `resolveProblem`（提交与样例测试允许从文件名识别）：直接参数 → 已映射文件 → 从文件名识别（`problemName.ts`，支持默认命名 `OJ-题号.ext` 与 Java 目录 `OJ-题号/Main.java`）→ 最近题目 QuickPick。
 2. 取当前编辑器/映射文件，保存脏文件，代码不能为空。
 3. 语言：`ProblemRef.languages` 或题面缓存；仍为空时 `languageForProblem` 再尝试一次题目详情页；QuickPick 记忆在 globalState `vjudge.lastLanguage`，优先于 `vjudge.defaultLanguage`；无列表时允许手输（默认 `GNU G++17`）。
 4. 提交循环最多 3 次，遇 `CaptchaRequiredError` 弹验证码 Webview（可刷新/取消）；`open` 取 `vjudge.openCodePublicly`。
@@ -174,7 +177,7 @@ VS Code UI（TreeView / Webview / Notification / StatusBar）
 
 ### 7.5 本地样例测试（`sampleRunner.runSamples`）
 
-1. 从题面取样例时需要登录；已导入的 CPH 测试不联网。解析目标文件：映射文件优先，否则当前编辑器。
+1. 从题面取样例时需要登录；已导入的 CPH 测试不联网。解析目标文件：映射文件优先，否则当前编辑器；题目在映射缺失时按文件名识别（与提交一致）。
 2. 保存文件；按扩展名（小写、无点）查 `vjudge.testCommands`；缺失时提供“打开设置”。
 3. 当前文件存在已导入 CPH 测试且题目不冲突时，优先运行 CPH 测试；否则从题面缓存取样例，无样例直接提示。
 4. 每个样例写入临时目录 `vjudge-tests-*`，替换占位符并**自动加引号**：`{file}/{dir}/{exe}/{in}/{out}`。
@@ -258,7 +261,7 @@ VS Code UI（TreeView / Webview / Notification / StatusBar）
 | 配置 | `vjudge.languageTemplates` | 语言→模板文件路径；键可为扩展名（`cpp`、`.py`）或提交语言名（`GNU G++17`），值为绝对路径或相对首个工作区的路径；优先级高于全局模板；支持 `${title}`、`${oj}`、`${probNum}` |
 | 配置（CPH） | `cph.general.saveLocation` | 只读；CPH 自定义保存目录，导入时一并扫描 |
 | SecretStorage | `vjudge.password` / `vjudge.cookies` | 敏感信息 |
-| globalState | `vjudge.username` / `vjudge.lastLanguage` / `vjudge.remoteAccount.<oj>` / `vjudge.remoteRequired.<oj>` | 用户名缓存 / 上次提交语言 / 各 OJ 上次使用的远程账号绑定 ID / 该 OJ 只能使用个人账号提交（`submitMethods[0]` 为假或收到过 `submit_method_not_allowed`） |
+| globalState | `vjudge.username` / `vjudge.lastLanguage` / `vjudge.remoteAccount.<oj>` / `vjudge.remoteRequired.<oj>` / `vjudge.knownOjs` | 用户名缓存 / 上次提交语言 / 各 OJ 上次使用的远程账号绑定 ID / 该 OJ 只能使用个人账号提交（`submitMethods[0]` 为假或收到过 `submit_method_not_allowed`） / 见过的 OJ 显示名（用于拆分含连字符的 OJ 名称，最多 200 个） |
 | workspaceState | `vjudge.cphFiles` / `vjudge.cphSources` | 已导入 CPH `.prob` 文件路径数组 / 源码文件到 `.prob` 的关联 |
 | 上下文键 | `vjudge.loggedIn` | 控制欢迎页和菜单 |
 | contextValue | `vjudge.problem` / `vjudge.contest` / `vjudge.submission` / `vjudge.workbook` / `vjudge.workbookCategory` / `vjudge.info` | 右键/内联菜单匹配 |
@@ -291,6 +294,7 @@ VS Code UI（TreeView / Webview / Notification / StatusBar）
 - **调整题面列表**：元数据在 `parser.ts#collectJsonDescriptionRefs`/`parseDescriptions` 收集与排序，`client.descriptionsFromRef` 再兜底排序；面板只消费 `DescriptionRef[]`，新增字段先改 `types.ts`，再改 `statementPanel.descriptionsHtml` 的展示。
 - **调整数学渲染**：`statementPanel.ts` 的 `SCRIPT`（`SYMBOLS`、`parseCommand`、`parseEnvironment`）；保持 `String.raw` 写法避免转义丢失，渲染后加 `.mj` 类；正文跳过样例区，`pre/code` 只处理显式 `\(...\)`/`\[...\]`，不处理 `$`。Codeforces 的三重/六重美元定界符在 `parser.ts#normalizeCodeforcesMath`（由 `sanitizeStatementHtml` 调用）里归一化，新增定界符时同时改这里和 `scripts/check-parsers.js` 的“Codeforces 公式定界符”检查。
 - **调整题单**：`views/workbooks.ts`（分类状态、分页、详情缓存）+ `api/parser.ts#parseWorkbookDetail`（正文顺序、brief 兜底、`content/nodeId`）；新增字段先改 `WorkbookSummary`/`WorkbookDetail`，再改 `client.listWorkbooks` 的行映射。创建/更新走 `client.createWorkbook/updateWorkbook`（共享 `saveWorkbook`），题目集合由 `content` 中的 `[problem:...]` 标记决定；`commands.ts` 的 `parseProblemTokens/appendProblemMarkers` 负责解析与追加，更新时必须回传 `nodeId`。
+- **调整题目解析顺序**：提交和样例测试的 `resolveProblem` 兜底顺序是已映射文件 → `problemName.ts#problemRefFromPath` → 最近题目，其他命令不读文件名；文件名识别按连字符拆分，优先匹配 `vjudge.knownOjs` 中见过的 OJ 名称，新增命名格式时同步 `scripts/check-problem-name.js`。
 - **调整提交/轮询**：`client.submit`、`commands.pollSolution`；注意验证码重试上限与取消路径。
 - **错误提示**：命令层统一用 `reportError(prefix, error)`，登录类错误会提示“重新登录”；新增错误 kind 时同步 `errors.ts`。面向用户的文案不得直接暴露服务端错误键（如 `duplicate_code`），未识别的键统一显示为通用提示，原始键与 HTTP 状态由 `reportError` 写入输出通道；`duplicate_code` 在提交命令里单独弹出带“查看提交记录”按钮的说明。
 
@@ -302,6 +306,7 @@ VS Code UI（TreeView / Webview / Notification / StatusBar）
 npm run compile
 npm run check:parsers
 npm run check:cph
+npm run check:names
 ```
 
 fixture 文件名固定：`c803029b.html`（比赛页，如公开比赛 803029）与 `desc.html`（题面页）。查找顺序：`$VJUDGE_FIXTURE_DIR` → `os.tmpdir()` → `/tmp`。
@@ -357,7 +362,7 @@ npm run package
 
 1. **密码登录可能被人机验证拦截**：服务端 Turnstile 只在浏览器环境通过；Cookie 登录是正式支持的备用路径。
 2. **真实提交/验证码未做端到端自动化**：历史上只用匿名请求验证过接口形状；不要声称已全流程验证。
-3. **题目↔文件映射与“最近题目”只存在内存**：窗口重载后，从编辑器标题栏直接提交/测试可能不知道对应题目（需先从侧边栏或题面打开一次）。如需持久化，可把 `problemFiles` 写入 workspaceState，但要注意多工作区与文件移动。
+3. **题目↔文件映射与“最近题目”只存在内存**：窗口重载后，映射丢失；文件名符合默认命名（`OJ-题号.ext` 或 Java 的 `OJ-题号/Main.java`）时会从文件名识别题目，其他文件名仍需先从侧边栏或题面打开一次。如需持久化，可把 `problemFiles` 写入 workspaceState，但要注意多工作区与文件移动。
 4. **仅支持 HTTPS 直连 vjudge.net**：无代理、无 gzip 解压、Cookie 不区分 domain/path（只按主机白名单发送）。
 5. **题面 HTML 清洗基于正则**，不是完整 HTML 解析器；CSP 是第二道防线。任何新注入路径都必须先清洗。
 6. **题目详情页可能被登录或 Cloudflare 拦截**：已从比赛/搜索拿到 `descBriefs` 时，详情补全失败不会阻断题面；真正的人机验证页会提示在浏览器完成验证。不要把正常页面内联的 `__CF$cv$params` 当作验证页。
@@ -389,6 +394,7 @@ npm run package
 32. **附件链接不受 Cookie 保护**：下载复用 `https` 直连与 `CDN_BASE_URL` 规则，仅限 HTTP(S)，不读取工作区设置中的代理；网络受限环境下需自行保证 CDN 可达。
 33. **Codeforces 等平台必须用远程账号提交**：服务端对 `method=0` 返回 `submit_method_not_allowed`。插件优先读题目/比赛 JSON 的 `submitMethods` 直接选个人账号；元数据缺失且收到该错误时自动回退（`method=1` + `bindingId`），并把 OJ 记入 globalState `vjudge.remoteRequired.<oj>`。前提是已在 VJudge 的 `/user/remoteAccounts` 绑定对应 OJ 账号且状态为 `READY`；绑定账号在 OJ 端掉登录时提交会失败，需要重新在 VJudge 上登录该远程账号。
 34. **相同代码会被拒绝**：VJudge 对同一用户同一题目的重复源码返回 `submit.error.duplicate_code`（“这份代码之前已经提交过。”），被拒的尝试也可能计入；插件已避免对需要个人账号的 OJ 先发 `method=0`。需要重试时修改一行注释或空行，或更换提交语言。
+35. **文件名识别有边界**：只按 `<OJ>-<题号>` 识别，默认取第一个连字符拆分；OJ 名称本身含连字符（如 `e-olymp`）时需要该名称已在 `vjudge.knownOjs` 中（打开过对应题目即可），否则会拆错。Java 只在 `Main.java` 时读取上一级目录，且目录中的 OJ 名称必须已知，普通工程目录（如 `lab-3/Main.java`）不会被当作题号。识别结果不带比赛上下文（`contestId/contestNum`），比赛题在窗口重载后按公开题处理；与题号无关的 `a-b.cpp` 也会被当成题目，建议不要用这种文件名提交。
 
 ## 14. 术语
 

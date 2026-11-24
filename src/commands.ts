@@ -9,6 +9,7 @@ import { cphProblemRef } from './cphFormat';
 import { ensureGlobalHeaders, globalHeaderFile, globalHeadersDirectory } from './globalHeaders';
 import { ensureGlobalTemplates, globalTemplateFile, globalTemplatesDirectory } from './globalTemplates';
 import { problemFile, problemForFile, rememberProblemFile } from './problemFiles';
+import { problemRefFromPath } from './problemName';
 import { runImportedSamples, runSamples } from './sampleRunner';
 import { describeError, Session } from './session';
 import {
@@ -198,6 +199,7 @@ export function registerCommands(deps: CommandDeps): vscode.Disposable[] {
   const cphStore = new CphStore(context);
   let lastProblem: ProblemRef | undefined;
   const recent: RecentProblem[] = [];
+  const knownOjsKey = 'vjudge.knownOjs';
 
   const remember = (ref: ProblemRef): void => {
     lastProblem = ref;
@@ -213,6 +215,10 @@ export function registerCommands(deps: CommandDeps): vscode.Disposable[] {
     });
     if (recent.length > 20) {
       recent.length = 20;
+    }
+    const knownOjs = context.globalState.get<string[]>(knownOjsKey, []);
+    if (ref.oj && !knownOjs.some((name) => name.toLowerCase() === ref.oj.toLowerCase())) {
+      void context.globalState.update(knownOjsKey, [...knownOjs, ref.oj].slice(-200));
     }
   };
 
@@ -243,6 +249,7 @@ export function registerCommands(deps: CommandDeps): vscode.Disposable[] {
   const resolveProblem = async (
     arg: unknown,
     interactive = true,
+    inferFromFileName = false,
   ): Promise<ProblemRef | undefined> => {
     const direct = unwrapNode(arg);
     if (isProblemRef(direct)) {
@@ -257,13 +264,23 @@ export function registerCommands(deps: CommandDeps): vscode.Disposable[] {
       if (mapped) {
         return mapped;
       }
+      if (inferFromFileName && uri.scheme === 'file') {
+        const inferred = problemRefFromPath(uri.fsPath, [
+          ...recent.map((item) => item.ref.oj),
+          ...context.globalState.get<string[]>(knownOjsKey, []),
+        ]);
+        if (inferred) {
+          output.appendLine(`[VJudge] 已从文件名识别题目：${inferred.oj}-${inferred.probNum}`);
+          return inferred;
+        }
+      }
     }
     if (!interactive) {
       return lastProblem;
     }
     if (recent.length === 0) {
       void vscode.window.showWarningMessage(
-        '无法确定要操作的题目。请先从侧边栏打开一道题目。',
+        '无法确定要操作的题目。请先从侧边栏打开一道题目，或将代码文件按“OJ-题号”命名（如 CodeForces-4A.cpp）。',
       );
       return undefined;
     }
@@ -1290,7 +1307,7 @@ a { color: var(--vscode-textLink-foreground); }
   };
 
   const submitProblem = async (arg: unknown): Promise<void> => {
-    const ref = await resolveProblem(arg);
+    const ref = await resolveProblem(arg, true, true);
     if (!ref) {
       return;
     }
@@ -1655,7 +1672,7 @@ a { color: var(--vscode-textLink-foreground); }
       }
     }
 
-    const ref = currentRef ?? (await resolveProblem(arg));
+    const ref = currentRef ?? (await resolveProblem(arg, true, true));
     if (!ref) {
       return;
     }

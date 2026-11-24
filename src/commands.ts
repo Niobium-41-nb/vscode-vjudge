@@ -447,6 +447,12 @@ export function registerCommands(deps: CommandDeps): vscode.Disposable[] {
         return statementInfo.languages;
       }
       const detail = await session.client.getProblemDetail(ref.oj, ref.probNum);
+      if (!ref.languages || Object.keys(ref.languages).length === 0) {
+        ref.languages = detail.languages;
+      }
+      if (!ref.submitMethods && detail.submitMethods) {
+        ref.submitMethods = detail.submitMethods;
+      }
       return detail.languages;
     } catch (error) {
       output.appendLine(`[VJudge] 获取语言列表失败：${describeError(error)}`);
@@ -1306,6 +1312,50 @@ a { color: var(--vscode-textLink-foreground); }
 </html>`;
   };
 
+  const waitForRun = async (
+    ref: ProblemRef,
+    runId: number,
+    labels: { started: string; sent: string },
+  ): Promise<void> => {
+    output.appendLine(`[VJudge] ${labels.started}，运行 ID ${runId}`);
+    let solution: Solution | undefined;
+    try {
+      solution = await pollSolution(runId);
+    } catch (error) {
+      void vscode.window.showWarningMessage(
+        `${labels.sent}，但获取评测结果失败：${describeError(error)}`,
+      );
+    }
+    submissions.refresh();
+    void submissions.reload(true);
+
+    if (!solution) {
+      void vscode.window.showInformationMessage(
+        `${labels.sent}（#${runId}），结果请在提交记录中查看。`,
+      );
+      return;
+    }
+    if (!solution.processing && solution.statusType !== 2) {
+      session.noteSubmissionResult(ref, solution.statusType);
+      problems.refreshSolveStates();
+      contests.refreshSolveStates();
+      workbooks.refreshSolveStates();
+    }
+    output.appendLine(`[VJudge] #${runId} 结果：${solution.status}`);
+    if (solution.statusType === 0) {
+      void vscode.window.showInformationMessage(solution.status || '通过');
+    } else {
+      const actions = solution.additionalInfo ? ['查看详情'] : [];
+      const choice = await vscode.window.showErrorMessage(
+        solution.status || '评测未通过',
+        ...actions,
+      );
+      if (choice === '查看详情' && solution.additionalInfo) {
+        showAdditionalInfo(runId, solution.additionalInfo);
+      }
+    }
+  };
+
   const submitProblem = async (arg: unknown): Promise<void> => {
     const ref = await resolveProblem(arg, true, true);
     if (!ref) {
@@ -1413,45 +1463,143 @@ a { color: var(--vscode-textLink-foreground); }
       return;
     }
 
-    output.appendLine(
-      `[VJudge] 已提交 ${ref.oj}-${ref.probNum}（${language}），运行 ID ${runId}`,
-    );
-    let solution: Solution | undefined;
-    try {
-      solution = await pollSolution(runId);
-    } catch (error) {
-      void vscode.window.showWarningMessage(
-        `提交已发送，但获取评测结果失败：${describeError(error)}`,
-      );
-    }
-    submissions.refresh();
-    void submissions.reload(true);
+    await waitForRun(ref, runId, {
+      started: `已提交 ${ref.oj}-${ref.probNum}（${language}）`,
+      sent: '提交已发送',
+    });
+  };
 
-    if (!solution) {
-      void vscode.window.showInformationMessage(
-        `提交已发送（#${runId}），结果请在提交记录中查看。`,
+  const archiveLanguage = (languages: Record<string, string>): string => {
+    const preferred =
+      context.globalState.get<string>('vjudge.lastLanguage') ??
+      getConfiguration('defaultLanguage', '');
+    if (preferred) {
+      if (languages[preferred]) {
+        return preferred;
+      }
+      const byLabel = Object.entries(languages).find(([, label]) => label === preferred);
+      if (byLabel) {
+        return byLabel[0];
+      }
+    }
+    return Object.keys(languages)[0] ?? '';
+  };
+
+  const archiveSubmission = async (arg: unknown): Promise<void> => {
+    const ref = await resolveProblem(arg, true, true);
+    if (!ref) {
+      return;
+    }
+    if (!(await ensureLogin())) {
+      return;
+    }
+    const languages = await languageForProblem(ref);
+    if (ref.submitMethods && ref.submitMethods[2] !== true) {
+      void vscode.window.showWarningMessage(
+        `${ref.oj} 的这道题不支持归档提交。请改用普通提交，或在浏览器打开题目确认可用的提交方式。`,
       );
       return;
     }
-    if (!solution.processing && solution.statusType !== 2) {
-      session.noteSubmissionResult(ref, solution.statusType);
-      problems.refreshSolveStates();
-      contests.refreshSolveStates();
-      workbooks.refreshSolveStates();
-    }
-    output.appendLine(`[VJudge] #${runId} 结果：${solution.status}`);
-    if (solution.statusType === 0) {
-      void vscode.window.showInformationMessage(solution.status || '通过');
-    } else {
-      const actions = solution.additionalInfo ? ['查看详情'] : [];
-      const choice = await vscode.window.showErrorMessage(
-        solution.status || '评测未通过',
-        ...actions,
+    const language = archiveLanguage(languages);
+    if (!language) {
+      void vscode.window.showWarningMessage(
+        '无法获取该题的提交语言，请先打开一次题面后再归档。',
       );
-      if (choice === '查看详情' && solution.additionalInfo) {
-        showAdditionalInfo(runId, solution.additionalInfo);
-      }
+      return;
     }
+
+    const origin = `https://vjudge.net/problem/${encodeURIComponent(ref.oj)}-${encodeURIComponent(ref.probNum)}/origin`;
+    const choice = await vscode.window.showWarningMessage(
+      `归档提交不会上传本地代码，而是让 VJudge 收录已绑定的 ${ref.oj} 账号在 ${ref.oj}-${ref.probNum} 上最近一次提交。请先在原 OJ 完成提交，再继续。`,
+      { modal: true },
+      '继续归档',
+      '打开原题',
+    );
+    if (choice === '打开原题') {
+      void vscode.env.openExternal(vscode.Uri.parse(origin));
+      return;
+    }
+    if (choice !== '继续归档') {
+      return;
+    }
+
+    const accountId = await chooseRemoteAccount(ref.oj);
+    if (accountId === undefined) {
+      return;
+    }
+
+    let runId: number | undefined;
+    let captcha: string | undefined;
+    try {
+      for (let attempt = 0; attempt < 3 && runId === undefined; attempt++) {
+        try {
+          runId = await session.client.submit({
+            oj: ref.oj,
+            probNum: ref.probNum,
+            title: ref.title,
+            contestId: ref.contestId,
+            contestNum: ref.contestNum,
+            language,
+            code: '',
+            captcha,
+            open: getConfiguration('openCodePublicly', false),
+            method: 2,
+            bindingId: accountId,
+          });
+        } catch (error) {
+          if (error instanceof CaptchaRequiredError) {
+            captcha = await promptCaptcha();
+            if (captcha === undefined) {
+              void vscode.window.showWarningMessage('已取消归档。');
+              return;
+            }
+            continue;
+          }
+          throw error;
+        }
+      }
+    } catch (error) {
+      if (
+        error instanceof VJudgeError &&
+        /no_recent_submissions_found$/i.test(error.i18nKey ?? '')
+      ) {
+        const action = await vscode.window.showWarningMessage(
+          '归档失败：没有找到最近提交。请先在原 OJ 提交该题，并确认使用的远程账号与 VJudge 绑定的一致。',
+          '打开原题',
+        );
+        if (action === '打开原题') {
+          void vscode.env.openExternal(vscode.Uri.parse(origin));
+        }
+        return;
+      }
+      const key = error instanceof VJudgeError ? error.i18nKey ?? '' : '';
+      if (/archive_reverify_required$|bind_account_(missing|invalid|locked|disconnected)$/i.test(key)) {
+        const action = await vscode.window.showWarningMessage(
+          describeError(error),
+          '管理账号',
+        );
+        if (action === '管理账号') {
+          void vscode.env.openExternal(
+            vscode.Uri.parse(
+              `https://vjudge.net/user/remoteAccounts?oj=${encodeURIComponent(ref.oj)}`,
+            ),
+          );
+        }
+        return;
+      }
+      await reportError('归档提交失败：', error);
+      return;
+    }
+    if (runId === undefined) {
+      void vscode.window.showErrorMessage('归档失败：验证码尝试次数过多。');
+      return;
+    }
+
+    remember(ref);
+    await waitForRun(ref, runId, {
+      started: `已发起归档 ${ref.oj}-${ref.probNum}`,
+      sent: '归档已发起',
+    });
   };
 
   const decodeCode = (solution: Solution): string => {
@@ -1689,6 +1837,9 @@ a { color: var(--vscode-textLink-foreground); }
       case 'submit':
         await submitProblem(ref);
         break;
+      case 'archive':
+        await archiveSubmission(ref);
+        break;
       case 'newFile':
         await newFile(ref);
         break;
@@ -1761,6 +1912,7 @@ a { color: var(--vscode-textLink-foreground); }
     }),
     vscode.commands.registerCommand('vjudge.openProblem', openProblem),
     vscode.commands.registerCommand('vjudge.submit', submitProblem),
+    vscode.commands.registerCommand('vjudge.archiveSubmit', archiveSubmission),
     vscode.commands.registerCommand('vjudge.newFile', newFile),
     vscode.commands.registerCommand('vjudge.testSamples', testSamples),
     vscode.commands.registerCommand('vjudge.importCph', importCph),

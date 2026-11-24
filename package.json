@@ -2,7 +2,7 @@
   "name": "vjudge",
   "displayName": "VJudge",
   "description": "在 VS Code 中浏览 VJudge 题目、阅读题面、提交代码并查看评测结果。",
-  "version": "0.2.9",
+  "version": "0.2.10",
   "publisher": "niobium-41-nb",
   "license": "MIT",
   "repository": {
@@ -35,7 +35,8 @@
     "onView:vjudge.submissions",
     "onView:vjudge.workbooks",
     "onCommand:vjudge.login",
-    "onCommand:vjudge.submit"
+    "onCommand:vjudge.submit",
+    "onCommand:vjudge.archiveSubmit"
   ],
   "capabilities": {
     "untrustedWorkspaces": {
@@ -184,6 +185,11 @@
         "command": "vjudge.submit",
         "title": "VJudge: 提交代码",
         "icon": "$(cloud-upload)"
+      },
+      {
+        "command": "vjudge.archiveSubmit",
+        "title": "VJudge: 归档提交",
+        "icon": "$(archive)"
       },
       {
         "command": "vjudge.newFile",
@@ -348,9 +354,14 @@
           "group": "1_open@2"
         },
         {
-          "command": "vjudge.newFile",
+          "command": "vjudge.archiveSubmit",
           "when": "viewItem == vjudge.problem",
           "group": "1_open@3"
+        },
+        {
+          "command": "vjudge.newFile",
+          "when": "viewItem == vjudge.problem",
+          "group": "1_open@4"
         },
         {
           "command": "vjudge.openInBrowser",
@@ -536,6 +547,7 @@
     "check:cph": "node scripts/check-cph.js",
     "check:templates": "node scripts/check-templates.js",
     "check:names": "node scripts/check-problem-name.js",
+    "check:archive": "node scripts/check-archive.js",
     "package": "npx --yes @vscode/vsce package --no-dependencies"
   },
   "devDependencies": {

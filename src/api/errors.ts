@@ -51,6 +51,10 @@ const translations: Record<string, string> = {
   'submit.error.challenge_source_length': '提交的源码较长，请先在浏览器完成人机验证后重试。',
   'submit.error.problem_set_updated': '题面集合已更新，请刷新题面后重新提交。',
   'submit.error.archive_reverify_required': '绑定的远程账号会话已失效，请在 VJudge 重新验证该账号后再试。',
+  'submit.error.archive_not_allowed': '当前不允许使用归档提交。',
+  'submit.error.archive_processing': '目标 OJ 当前繁忙，请稍后再试。',
+  'submit.error.archive_query_failed': '获取最近归档提交失败，请稍后再试。',
+  'submit.error.no_recent_submissions_found': '没有找到最近提交。请先在原 OJ 提交该题，并确认远程账号与 VJudge 绑定的一致。',
   'submit.error.contest_not_begun': '比赛尚未开始，暂时不能提交。',
   'submit.error.problem_not_found': '题目不存在或不可提交。',
   'submit.error.submit_method_not_allowed': '该平台需要通过绑定的远程账号提交，VJudge 不允许使用默认通道。',
@@ -85,6 +89,18 @@ export function translateI18n(key: string | undefined): string | undefined {
   }
   if (key.endsWith('submit_method_not_allowed')) {
     return '该平台需要通过绑定的远程账号提交，VJudge 不允许使用默认通道。';
+  }
+  if (key.endsWith('no_recent_submissions_found')) {
+    return '没有找到最近提交。请先在原 OJ 提交该题，并确认远程账号与 VJudge 绑定的一致。';
+  }
+  if (key.endsWith('archive_not_allowed')) {
+    return '当前不允许使用归档提交。';
+  }
+  if (key.endsWith('archive_processing')) {
+    return '目标 OJ 当前繁忙，请稍后再试。';
+  }
+  if (key.endsWith('archive_query_failed')) {
+    return '获取最近归档提交失败，请稍后再试。';
   }
   if (key.endsWith('duplicate_code')) {
     return 'VJudge 判定这份代码与该题之前提交过的代码完全相同，已拒绝重复提交。请修改代码（例如加一行注释或空行）或更换提交语言后再试。';

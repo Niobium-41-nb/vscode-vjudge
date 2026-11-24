@@ -8,6 +8,7 @@ import { fetchStatement } from '../statementCache';
 
 export type StatementCommand =
   | 'submit'
+  | 'archive'
   | 'newFile'
   | 'testSamples'
   | 'openBrowser'
@@ -15,6 +16,7 @@ export type StatementCommand =
 
 const TOOLBAR: { command: string; label: string; secondary?: boolean }[] = [
   { command: 'submit', label: '提交代码' },
+  { command: 'archive', label: '归档提交', secondary: true },
   { command: 'newFile', label: '新建代码文件', secondary: true },
   { command: 'testSamples', label: '测试样例', secondary: true },
   { command: 'openBrowser', label: '在浏览器打开', secondary: true },

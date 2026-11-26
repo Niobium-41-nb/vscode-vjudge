@@ -370,32 +370,58 @@ export class VJudgeClient {
     const response = await this.request('POST', '/user/login', {
       form: { username, password, token: '' },
       html: false,
+      ajax: false,
     });
     const text = response.body.toString('utf8').trim();
-    if (text === 'success' || text === '"success"') {
-      return;
-    }
     const data = parseJsonBody(response.body);
-    if (data && typeof data === 'object') {
-      const record = data as Record<string, unknown>;
-      if (record.success === true) {
-        return;
-      }
-    }
+    const record = data && typeof data === 'object' ? data as Record<string, unknown> : undefined;
     const key = extractI18nKey(data);
+
+    if (isChallengePage(text) || record?.captcha === true || record?.challenge === true) {
+      throw new VJudgeError(
+        'VJudge 要求人机验证。请在浏览器中完成登录后使用 Cookie 登录。',
+        key ?? 'user.auth.error.human_verification_failed',
+        response.status,
+        data,
+        'captcha',
+      );
+    }
+    if (response.status === 429) {
+      throw new VJudgeError('登录请求过于频繁，请稍后再试。', key, response.status, data);
+    }
     if (key) {
       throw makeClientError(data, response.status, '登录失败。');
     }
-    if (response.status === 401 || response.status === 403) {
+
+    const succeeded =
+      text === 'success' || text === '"success"' || record?.success === true || (!text && this.hasCookies());
+    if (!succeeded) {
+      if (response.status === 401 || response.status === 403 || this.isLoginResponse(response)) {
+        throw new VJudgeError(
+          response.status === 403
+            ? '登录被 VJudge 拒绝，请稍后重试或使用 Cookie 登录。'
+            : '用户名或密码错误。',
+          key,
+          response.status,
+          data,
+        );
+      }
       throw new VJudgeError(
-        response.status === 403 ? '登录被 VJudge 拒绝，请尝试使用 Cookie 登录。' : '用户名或密码错误。',
+        `VJudge 返回了无法识别的响应（HTTP ${response.status}）。`,
         key,
         response.status,
-        data,
+        data ?? text.slice(0, 300),
       );
     }
-    const detail = data ? JSON.stringify(data).slice(0, 300) : text.slice(0, 300);
-    throw new VJudgeError(`登录失败：${detail}`, key, response.status, data);
+
+    try {
+      if (!(await this.checkLoginStatus())) {
+        throw new VJudgeError('登录请求已被接受，但当前会话仍未生效，请重试。');
+      }
+    } catch (error) {
+      this.clearCookies();
+      throw error;
+    }
   }
 
   async checkLoginStatus(): Promise<boolean> {

@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { normalizeUsername, solveStatusKey, VJudgeClient } from './api/client';
+import { normalizeUsername, solveStatusKey, VJUDGE_BASE, VJudgeClient } from './api/client';
 import { VJudgeError } from './api/errors';
 import { ProblemRef, SolveRecords } from './api/types';
 
@@ -106,6 +106,10 @@ export class Session implements vscode.Disposable {
         await this.setLoggedIn(true);
         this.output.appendLine('[VJudge] 已通过保存的会话恢复登录。');
       } else {
+        if (cookieRejected) {
+          this.client.clearCookies();
+          await this.context.secrets.delete(SECRET_COOKIE);
+        }
         const password = await this.context.secrets.get(SECRET_PASSWORD);
         if (this.usernameValue && password) {
           try {
@@ -126,11 +130,9 @@ export class Session implements vscode.Disposable {
     }
 
     if (cookieRejected && !this.loggedInFlag) {
-      this.client.clearCookies();
-      await this.context.secrets.delete(SECRET_COOKIE);
       this.output.appendLine('[VJudge] 保存的 Cookie 已失效，已清除，等待用户重新登录。');
       void this.handleLoginExpired(
-        '保存的 VJudge 登录已失效（Cookie 已过期或被注销）。请重新粘贴浏览器中的 Cookie。',
+        '保存的 VJudge 登录已失效（Cookie 已过期或被注销）。请重新粘贴浏览器中的 Cookie，或使用账号密码登录。',
       );
     }
     await this.persistCookies();
@@ -213,54 +215,75 @@ export class Session implements vscode.Disposable {
 
   async login(): Promise<boolean> {
     this.refreshTimeout();
-    const username = await vscode.window.showInputBox({
-      title: 'VJudge 登录',
-      prompt: '输入 VJudge 用户名',
-      value: this.usernameValue ?? '',
-      ignoreFocusOut: true,
-      validateInput: (value) => (value.trim() ? undefined : '请输入用户名'),
-    });
-    if (username === undefined) {
-      return false;
-    }
-    const password = await vscode.window.showInputBox({
-      title: 'VJudge 登录',
-      prompt: '输入 VJudge 密码（保存在 VS Code 安全存储中）',
-      password: true,
-      ignoreFocusOut: true,
-      validateInput: (value) => (value ? undefined : '请输入密码'),
-    });
-    if (password === undefined) {
-      return false;
-    }
-
-    try {
-      await this.client.login(username.trim(), password);
-    } catch (error) {
-      const message = describeError(error);
-      const key = error instanceof VJudgeError ? error.i18nKey : undefined;
-      const needsHumanVerification =
-        (key && /human_verification|turnstile|captcha/i.test(key)) ||
-        (error instanceof VJudgeError && error.status === 403);
-      const choice = await vscode.window.showErrorMessage(
-        needsHumanVerification
-          ? `登录失败：${message}（VJudge 可能要求人机验证，可改用 Cookie 登录）`
-          : `登录失败：${message}`,
-        '使用 Cookie 登录',
-      );
-      if (choice === '使用 Cookie 登录') {
-        return this.loginWithCookie();
+    while (true) {
+      const username = await vscode.window.showInputBox({
+        title: 'VJudge 登录',
+        prompt: '输入 VJudge 用户名',
+        value: this.usernameValue ?? '',
+        ignoreFocusOut: true,
+        validateInput: (value) => (value.trim() ? undefined : '请输入用户名'),
+      });
+      if (username === undefined) {
+        return false;
       }
-      return false;
-    }
+      const password = await vscode.window.showInputBox({
+        title: 'VJudge 登录',
+        prompt: '输入 VJudge 密码（仅保存在 VS Code 安全存储中，用于自动登录）',
+        password: true,
+        ignoreFocusOut: true,
+        validateInput: (value) => (value ? undefined : '请输入密码'),
+      });
+      if (password === undefined) {
+        return false;
+      }
 
-    this.resetSolveRecords();
-    await this.setUsername(username.trim());
-    await this.context.secrets.store(SECRET_PASSWORD, password);
-    await this.persistCookies();
-    await this.setLoggedIn(true);
-    void vscode.window.showInformationMessage(`已登录 VJudge：${username.trim()}`);
-    return true;
+      const normalizedUsername = username.trim();
+      const previousCookies = this.client.exportCookies();
+      this.client.clearCookies();
+      try {
+        await vscode.window.withProgress(
+          {
+            title: '正在登录 VJudge…',
+            location: vscode.ProgressLocation.Notification,
+            cancellable: false,
+          },
+          () => this.client.login(normalizedUsername, password),
+        );
+      } catch (error) {
+        this.client.clearCookies();
+        this.client.importCookies(previousCookies);
+        const message = describeError(error);
+        const key = error instanceof VJudgeError ? error.i18nKey : undefined;
+        const needsHumanVerification =
+          (error instanceof VJudgeError && error.kind === 'captcha') ||
+          (key && /human_verification|turnstile|captcha/i.test(key));
+        const choice = await vscode.window.showErrorMessage(
+          `登录失败：${message}`,
+          ...(needsHumanVerification
+            ? ['使用 Cookie 登录', '在浏览器中登录']
+            : ['重试', '使用 Cookie 登录']),
+        );
+        if (choice === '使用 Cookie 登录') {
+          return this.loginWithCookie();
+        }
+        if (choice === '在浏览器中登录') {
+          await vscode.env.openExternal(vscode.Uri.parse(`${VJUDGE_BASE}/user/login`));
+          return false;
+        }
+        if (choice !== '重试') {
+          return false;
+        }
+        continue;
+      }
+
+      this.resetSolveRecords();
+      await this.setUsername(normalizedUsername);
+      await this.context.secrets.store(SECRET_PASSWORD, password);
+      await this.persistCookies();
+      await this.setLoggedIn(true);
+      void vscode.window.showInformationMessage(`已登录 VJudge：${normalizedUsername}`);
+      return true;
+    }
   }
 
   async loginWithCookie(): Promise<boolean> {

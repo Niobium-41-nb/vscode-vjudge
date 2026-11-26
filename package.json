@@ -2,7 +2,7 @@
   "name": "vjudge",
   "displayName": "VJudge",
   "description": "在 VS Code 中浏览 VJudge 题目、阅读题面、提交代码并查看评测结果。",
-  "version": "0.2.11",
+  "version": "0.2.12",
   "publisher": "niobium-41-nb",
   "license": "MIT",
   "repository": {
@@ -548,6 +548,7 @@
     "check:templates": "node scripts/check-templates.js",
     "check:names": "node scripts/check-problem-name.js",
     "check:archive": "node scripts/check-archive.js",
+    "check:login": "node scripts/check-login.js",
     "package": "npx --yes @vscode/vsce package --no-dependencies"
   },
   "devDependencies": {

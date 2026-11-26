@@ -7,7 +7,7 @@
 - 目标：在 VS Code 中完成 VJudge（https://vjudge.net/）的题目浏览/搜索、题面阅读、代码提交、评测轮询、提交记录、比赛题目、题单（workbook）和本地样例测试。
 - 技术栈：TypeScript + VS Code Extension API，CommonJS 输出到 `out/`，入口 `out/extension.js`。
 - 运行时零第三方依赖；只用 Node 内置模块（`https`、`child_process`、`fs`、`crypto` 等）。
-- 当前版本 `0.2.11`，产物 `vjudge-0.2.11.vsix`（不纳入版本控制）。
+- 当前版本 `0.2.12`，产物 `vjudge-0.2.12.vsix`（不纳入版本控制）。
 - 所有界面文案、错误提示、注释使用中文；不要引入 emoji。
 
 ## 2. 常用命令
@@ -19,6 +19,7 @@ npm run watch          # 增量编译
 npm run check:parsers  # 用真实页面 fixture 验证解析器（见第 12 节）
 npm run check:names    # 验证从文件名识别题目
 npm run check:archive  # 验证归档提交请求与错误提示
+npm run check:login    # 验证密码登录请求、会话复核与失败恢复
 npm run package        # npx @vscode/vsce package --no-dependencies，生成 VSIX
 ```
 
@@ -57,6 +58,7 @@ npm run package        # npx @vscode/vsce package --no-dependencies，生成 VSI
 | `scripts/check-parsers.js` | 解析器回归检查（读取 out/ 与 fixture） |
 | `scripts/check-problem-name.js` | 文件名识别题目的回归检查 |
 | `scripts/check-archive.js` | 归档提交请求字段与错误提示的回归检查 |
+| `scripts/check-login.js` | 密码登录请求、人机验证、会话复核、失效 Cookie 清理与失败恢复的回归检查 |
 | `resources/` | 图标（活动栏、绿/红/灰状态） |
 
 ## 4. 运行时结构
@@ -103,7 +105,7 @@ VS Code UI（TreeView / Webview / Notification / StatusBar）
 
 | 方法/路径 | 说明 | 关键点 |
 | --- | --- | --- |
-| `POST /user/login` | 表单 `username,password,token=''` | 成功返回文本 `success`；失败可能是 JSON（`i18nKey`）或 403；Turnstile 可能拦截 |
+| `POST /user/login` | 表单 `username,password,token=''` | 成功可能返回文本 `success`、JSON `success:true`，或 HTTP 200 空响应并下发新会话 Cookie；客户端收到空响应且已有 Cookie 时会继续用 `checkLogInStatus` 复核；失败可能是 JSON（`i18nKey`）或 403；Turnstile 可能拦截 |
 | `POST /user/checkLogInStatus` | 返回 `true`/`false` | 用于恢复 Cookie 登录 |
 | `POST /user/logout` | 注销 | 失败也继续清本地 Cookie |
 | `GET /`（登录后主页） | HTML | `getUsername()` 从页面里的 `/user/{name}` 链接提取当前用户名；`/user/`（带斜杠）线上返回 404，不能用于识别用户名 |
@@ -138,7 +140,7 @@ VS Code UI（TreeView / Webview / Notification / StatusBar）
 ### 7.1 登录与会话恢复（`src/session.ts`）
 
 1. `initialize()`：读取 globalState/配置中的用户名（`404`、`user` 等无效值会被丢弃）→ 导入 SecretStorage Cookie → `checkLogInStatus`；Cookie 有效时再请求登录后主页校正用户名（避免沿用错误的缓存名）。
-2. `checkLogInStatus` 明确判定 Cookie 失效时，若存在已保存的用户名+密码则自动登录；仍失败（或没有保存密码）时清除失效 Cookie 与 SecretStorage 记录，并弹出通知引导“重新粘贴 Cookie / 用户名密码登录”，Cookie 优先。
+2. `checkLogInStatus` 明确判定 Cookie 失效时，先清除本地失效 Cookie，若存在已保存的用户名+密码则自动登录；密码登录成功后必须再次通过 `checkLogInStatus` 才会进入登录态。仍失败（或没有保存密码）时弹出通知引导“重新粘贴 Cookie / 用户名密码登录”，Cookie 优先。前台密码登录失败会恢复原有 Cookie，不清除已保存密码。
 3. 登录成功后：用户名写入 globalState 与 `vjudge.username` 配置，密码写入 SecretStorage，Cookie 持久化，触发 `vjudge.loggedIn` 上下文与 `onDidChangeLogin`。
 4. Cookie 登录：保存旧 Cookie → 清空现有 Cookie → 导入用户粘贴串（支持 `JSESSIONID=...; ...` 或裸 JSESSIONID）→ 验证 → **优先使用服务端自动识别到的用户名**，识别失败才用输入值；验证失败时恢复旧 Cookie，避免一次错误粘贴顶掉仍可用的会话。
 5. Cookie 持久化：`VJudgeClient.storeCookies` 在服务端下发/更新/清空 Cookie 后触发 `onCookiesChanged`，`Session` 防抖 500ms 写入 SecretStorage；导出为空时删除 SecretStorage 记录（`persistCookies` 统一处理）。
@@ -311,6 +313,7 @@ npm run check:parsers
 npm run check:cph
 npm run check:names
 npm run check:archive
+npm run check:login
 ```
 
 fixture 文件名固定：`c803029b.html`（比赛页，如公开比赛 803029）与 `desc.html`（题面页）。查找顺序：`$VJUDGE_FIXTURE_DIR` → `os.tmpdir()` → `/tmp`。
